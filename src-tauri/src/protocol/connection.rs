@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+use tokio::sync::watch;
+
 use crate::system_info::SystemInfoData;
 use super::types::*;
 
@@ -134,6 +136,15 @@ fn build_outbound_packet(
         }
     }
 
+    // Game Data tag (0x0E) — sent when game_data is non-empty
+    if !state.game_data.is_empty() {
+        let gd_bytes = state.game_data.as_bytes();
+        let gd_len = gd_bytes.len().min(255); // Cap at 255 bytes
+        pkt.push((1 + gd_len) as u8); // Size: id(1) + data
+        pkt.push(0x0E);               // Tag ID: Game Data
+        pkt.extend_from_slice(&gd_bytes[..gd_len]);
+    }
+
     pkt
 }
 
@@ -242,6 +253,7 @@ pub struct DsState {
     pub alliance: Alliance,
     pub request_reboot: bool,
     pub request_restart_code: bool,
+    pub game_data: String,
 }
 
 impl Default for DsState {
@@ -253,6 +265,7 @@ impl Default for DsState {
             alliance: Alliance::Red1,
             request_reboot: false,
             request_restart_code: false,
+            game_data: String::new(),
         }
     }
 }
@@ -269,6 +282,7 @@ pub enum DsCommand {
     RebootRio,
     RestartCode,
     SetTargetIp(String),
+    SetGameData(String),
 }
 
 /// Events emitted from the protocol loop to the frontend
@@ -282,6 +296,7 @@ pub enum DsEvent {
     SystemInfo(SystemInfoData),
     ConnectionStatus(ConnectionStatus),
     PowerData(PowerData),
+    VersionInfo(VersionInfo),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,10 +331,13 @@ pub async fn protocol_loop(
     mut cmd_rx: mpsc::Receiver<DsCommand>,
     event_tx: mpsc::Sender<DsEvent>,
     joystick_state: Arc<RwLock<Vec<JoystickState>>>,
+    target_ip_tx: watch::Sender<String>,
 ) {
     let mut team_number: u32 = 0;
     let mut target_ip = team_to_ip(0);
     let mut ds_state = DsState::default();
+    let mut pending_discovery: Option<tokio::task::JoinHandle<()>> = None;
+    let (discovery_tx, mut discovery_rx) = mpsc::channel::<String>(4);
     let mut robot_state = RobotState::default();
     let mut diag = DiagnosticData::default();
     let mut sequence: u16 = 0;
@@ -360,10 +378,19 @@ pub async fn protocol_loop(
                     DsCommand::SetTeamNumber(team) => {
                         team_number = team;
                         target_ip = team_to_ip(team);
+                        let _ = target_ip_tx.send(target_ip.clone());
                         tracing::info!("Team set to {team}, target IP: {target_ip}");
                         // Reset connection state
                         robot_state = RobotState::default();
                         ds_state.enabled = false;
+                        // Spawn mDNS discovery (result will override static IP)
+                        if let Some(h) = pending_discovery.take() {
+                            h.abort();
+                        }
+                        let dtx = discovery_tx.clone();
+                        pending_discovery = Some(tokio::spawn(
+                            crate::discovery::discover_roborio(team, dtx),
+                        ));
                     }
                     DsCommand::SetMode(mode) => {
                         ds_state.mode = mode;
@@ -394,7 +421,11 @@ pub async fn protocol_loop(
                         ds_state.request_restart_code = true;
                     }
                     DsCommand::SetTargetIp(ip) => {
-                        target_ip = ip;
+                        target_ip = ip.clone();
+                        let _ = target_ip_tx.send(ip);
+                    }
+                    DsCommand::SetGameData(data) => {
+                        ds_state.game_data = data;
                     }
                 }
             }
@@ -448,6 +479,13 @@ pub async fn protocol_loop(
                     parse_inbound_packet(&recv_buf[..len], &mut robot_state, &mut diag);
                     last_recv = Instant::now();
                 }
+            }
+
+            // mDNS discovery result
+            Some(ip) = discovery_rx.recv() => {
+                tracing::info!("mDNS discovery resolved: {ip}");
+                target_ip = ip.clone();
+                let _ = target_ip_tx.send(ip);
             }
 
             // 10Hz event emission to frontend

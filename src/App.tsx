@@ -39,12 +39,27 @@ export default function App() {
   const { state, setEnabledTime } = useRobotStore();
   const { compactMode, snapCompact, restoreFromCompact } = useCompactMode();
   const enabledStartRef = useRef<number | null>(null);
+  const dashboardLaunched = useRef(false);
   // Track held keys for the three-key enable combo: [ ] backslash
   const heldKeys = useRef<Set<string>>(new Set());
 
   // Subscribe to Tauri events
   useTauriEvents();
   useGamepadPolling();
+
+  // On mount, send persisted settings to backend + auto-launch dashboard
+  useEffect(() => {
+    if (!isTauri()) return;
+    const { teamNumber, alliance, autoDashboard } = useRobotStore.getState();
+    if (teamNumber !== 0) {
+      invoke("set_team_number", { team: teamNumber });
+    }
+    invoke("set_alliance", { alliance });
+    if (autoDashboard && !dashboardLaunched.current) {
+      dashboardLaunched.current = true;
+      invoke("launch_dashboard", { name: autoDashboard });
+    }
+  }, []);
 
   // Track enabled time
   useEffect(() => {

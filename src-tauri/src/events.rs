@@ -29,6 +29,9 @@ pub async fn event_bridge(app: AppHandle, mut event_rx: mpsc::Receiver<DsEvent>)
             DsEvent::PowerData(data) => {
                 let _ = app.emit("power-data", data);
             }
+            DsEvent::VersionInfo(info) => {
+                let _ = app.emit("version-info", info);
+            }
         }
     }
 }

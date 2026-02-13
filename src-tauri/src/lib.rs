@@ -2,6 +2,7 @@ mod commands;
 mod discovery;
 mod events;
 mod gamepad;
+mod log_writer;
 mod logging;
 mod network;
 mod protocol;
@@ -11,14 +12,15 @@ use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
 use tauri::Manager;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use gamepad::manager::GamepadManager;
 use protocol::connection::{protocol_loop, DsCommand, DsEvent};
-use protocol::types::{ConsoleMessage, JoystickState, PowerData};
+use protocol::types::{ConsoleMessage, JoystickState, PowerData, VersionInfo};
 
 pub struct AppState {
     pub cmd_tx: mpsc::Sender<DsCommand>,
+    pub target_ip_tx: watch::Sender<String>,
     pub gamepad_manager: Mutex<GamepadManager>,
 }
 
@@ -33,10 +35,13 @@ pub fn run() {
     let (cmd_tx, cmd_rx) = mpsc::channel::<DsCommand>(64);
     let (event_tx, event_rx) = mpsc::channel::<DsEvent>(256);
 
+    let (target_ip_tx, target_ip_rx) = watch::channel("127.0.0.1".to_string());
+
     let gamepad_manager = GamepadManager::new(joystick_state.clone());
 
     let app_state = AppState {
         cmd_tx: cmd_tx.clone(),
+        target_ip_tx: target_ip_tx.clone(),
         gamepad_manager: Mutex::new(gamepad_manager),
     };
 
@@ -62,6 +67,9 @@ pub fn run() {
             commands::config::set_team_number,
             commands::config::set_alliance,
             commands::config::set_target_ip,
+            commands::config::set_game_data,
+            commands::config::get_installed_dashboards,
+            commands::config::launch_dashboard,
             commands::gamepad::get_gamepads,
             commands::gamepad::reorder_gamepads,
             commands::gamepad::lock_gamepad_slot,
@@ -72,7 +80,7 @@ pub fn run() {
             let js_state = joystick_state.clone();
 
             // Spawn the protocol loop
-            tauri::async_runtime::spawn(protocol_loop(cmd_rx, event_tx, js_state));
+            tauri::async_runtime::spawn(protocol_loop(cmd_rx, event_tx, js_state, target_ip_tx.clone()));
 
             // Spawn the event bridge to push events to the frontend
             tauri::async_runtime::spawn(events::event_bridge(app_handle, event_rx));
@@ -80,20 +88,29 @@ pub fn run() {
             // Spawn TCP console log listener (connects to localhost initially)
             let (log_tx, mut log_rx) = mpsc::channel::<ConsoleMessage>(256);
             let (power_tx, mut power_rx) = mpsc::channel::<PowerData>(64);
+            let (version_tx, mut version_rx) = mpsc::channel::<VersionInfo>(16);
             let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
             let event_tx_log = event_tx_console.clone();
             let event_tx_power = event_tx_console.clone();
+            let event_tx_version = event_tx_console.clone();
 
             tauri::async_runtime::spawn(logging::console_log_listener(
-                "127.0.0.1".to_string(),
+                target_ip_rx,
                 log_tx,
                 power_tx,
                 shutdown_rx,
+                version_tx,
             ));
 
-            // Bridge console messages to the event system
+            // Spawn log file writer
+            let log_dir = app.path().app_data_dir().unwrap_or_default().join("logs");
+            let (file_log_tx, file_log_rx) = mpsc::channel::<ConsoleMessage>(256);
+            tauri::async_runtime::spawn(log_writer::log_file_writer(file_log_rx, log_dir));
+
+            // Bridge console messages to event system + file writer
             tauri::async_runtime::spawn(async move {
                 while let Some(msg) = log_rx.recv().await {
+                    let _ = file_log_tx.send(msg.clone()).await;
                     let _ = event_tx_log.send(DsEvent::Console(msg)).await;
                 }
             });
@@ -102,6 +119,13 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 while let Some(data) = power_rx.recv().await {
                     let _ = event_tx_power.send(DsEvent::PowerData(data)).await;
+                }
+            });
+
+            // Bridge version info to the event system
+            tauri::async_runtime::spawn(async move {
+                while let Some(info) = version_rx.recv().await {
+                    let _ = event_tx_version.send(DsEvent::VersionInfo(info)).await;
                 }
             });
 

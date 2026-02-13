@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useRobotStore } from "../../stores/robotStore";
 
 export default function DiagnosticsTab() {
-  const { state, diagnostics } = useRobotStore();
+  const { state, diagnostics, versionInfo } = useRobotStore();
 
   const handleReboot = () => invoke("reboot_rio");
   const handleRestart = () => invoke("restart_code");
@@ -58,6 +58,29 @@ export default function DiagnosticsTab() {
           <ResourceBar label="Disk" value={diagnostics.disk_usage / 100} />
         </div>
       </section>
+
+      {/* Version Info */}
+      {versionInfo && (
+        <section>
+          <h3 className="text-xs text-ds-text-dim uppercase tracking-wide mb-2">
+            RoboRIO Versions
+          </h3>
+          <div className="bg-ds-panel rounded p-3 flex flex-col gap-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-ds-text-dim">Image</span>
+              <span className="font-mono text-xs">{versionInfo.image_version || "—"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ds-text-dim">WPILib</span>
+              <span className="font-mono text-xs">{versionInfo.wpilib_version || "—"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ds-text-dim">RoboRIO</span>
+              <span className="font-mono text-xs">{versionInfo.rio_version || "—"}</span>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2">

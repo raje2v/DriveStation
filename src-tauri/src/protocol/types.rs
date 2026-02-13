@@ -180,3 +180,10 @@ pub struct ConsoleMessage {
     pub is_error: bool,
     pub sequence: u16,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VersionInfo {
+    pub image_version: String,
+    pub wpilib_version: String,
+    pub rio_version: String,
+}

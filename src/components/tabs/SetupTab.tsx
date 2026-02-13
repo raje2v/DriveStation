@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRobotStore } from "../../stores/robotStore";
 
@@ -7,9 +7,23 @@ const ALLIANCES = [
   "Blue1", "Blue2", "Blue3",
 ] as const;
 
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 export default function SetupTab() {
-  const { teamNumber, alliance, setTeamNumber, setAlliance } = useRobotStore();
+  const { teamNumber, alliance, autoDashboard, setTeamNumber, setAlliance, setAutoDashboard } =
+    useRobotStore();
   const [teamInput, setTeamInput] = useState(teamNumber.toString());
+  const [gameData, setGameData] = useState("");
+  const [installedDashboards, setInstalledDashboards] = useState<string[]>([]);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+
+  // Query which dashboards are installed
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke<string[]>("get_installed_dashboards").then(setInstalledDashboards);
+  }, []);
 
   const handleTeamSubmit = () => {
     const team = parseInt(teamInput, 10);
@@ -22,6 +36,24 @@ export default function SetupTab() {
   const handleAllianceChange = (a: string) => {
     setAlliance(a);
     invoke("set_alliance", { alliance: a });
+  };
+
+  const handleGameDataSubmit = () => {
+    if (isTauri()) {
+      invoke("set_game_data", { data: gameData });
+    }
+  };
+
+  const handleDashboardChange = async (value: string) => {
+    setAutoDashboard(value);
+    setDashboardError(null);
+    if (value && isTauri()) {
+      try {
+        await invoke("launch_dashboard", { name: value });
+      } catch (e) {
+        setDashboardError(String(e));
+      }
+    }
   };
 
   return (
@@ -103,6 +135,57 @@ export default function SetupTab() {
             <span className="font-mono">1150</span>
           </div>
         </div>
+      </section>
+
+      {/* Game Data */}
+      <section>
+        <h3 className="text-xs text-ds-text-dim uppercase tracking-wide mb-2">
+          Game Data
+        </h3>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={gameData}
+            onChange={(e) => setGameData(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleGameDataSubmit()}
+            maxLength={64}
+            className="flex-1 min-w-0 bg-ds-panel border border-ds-border rounded px-3 py-2 text-sm text-ds-text font-mono outline-none focus:border-ds-accent"
+            placeholder="e.g. LRL"
+          />
+          <button
+            onClick={handleGameDataSubmit}
+            className="px-3 py-2 rounded text-sm font-medium bg-ds-accent text-white hover:bg-ds-accent/80 transition-colors flex-shrink-0"
+          >
+            Set
+          </button>
+        </div>
+      </section>
+
+      {/* Dashboard */}
+      <section>
+        <h3 className="text-xs text-ds-text-dim uppercase tracking-wide mb-2">
+          Dashboard (auto-launch)
+        </h3>
+        <select
+          value={autoDashboard}
+          onChange={(e) => handleDashboardChange(e.target.value)}
+          className="w-full bg-ds-panel border border-ds-border rounded px-3 py-2 text-sm text-ds-text outline-none focus:border-ds-accent"
+        >
+          <option value="">None</option>
+          {installedDashboards.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+        {installedDashboards.length === 0 && (
+          <p className="text-xs text-ds-text-dim mt-1">
+            No dashboards detected
+          </p>
+        )}
+        {dashboardError && (
+          <p className="text-xs text-ds-red mt-1">{dashboardError}</p>
+        )}
       </section>
 
       {/* Keyboard Shortcuts */}

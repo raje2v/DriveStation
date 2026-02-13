@@ -1,9 +1,9 @@
 use anyhow::Result;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
-use crate::protocol::types::{ConsoleMessage, PowerData};
+use crate::protocol::types::{ConsoleMessage, PowerData, VersionInfo};
 
 /// Reads console output from the roboRIO TCP stream (port 1740)
 ///
@@ -15,23 +15,24 @@ use crate::protocol::types::{ConsoleMessage, PowerData};
 ///   0x0B = Error Message:   timestamp(4 f32) + seqnum(2 u16) + unknown(2)
 ///                           + error_code(4 i32) + flags(1) + details(2+n)
 ///                           + location(2+n) + callstack(2+n)
-///   0x0A = Version Info
+///   0x0A = Version Info: image(2+n) + wpilib(2+n) + rio(2+n)
 ///   0x00 = Radio Events
 ///   0x04 = Disable Faults: comms(2 u16) + 12v(2 u16)
 ///   0x05 = Rail Faults: 6v(2 u16) + 5v(2 u16) + 3.3v(2 u16)
 pub async fn console_log_listener(
-    target_ip: String,
+    mut target_ip_rx: watch::Receiver<String>,
     log_tx: mpsc::Sender<ConsoleMessage>,
     power_tx: mpsc::Sender<PowerData>,
-    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    mut shutdown_rx: watch::Receiver<bool>,
+    version_tx: mpsc::Sender<VersionInfo>,
 ) {
-    let addr = format!("{target_ip}:1740");
-    tracing::info!("Attempting TCP console connection to {addr}");
-
     loop {
         if *shutdown_rx.borrow() {
             return;
         }
+
+        let addr = format!("{}:1740", *target_ip_rx.borrow());
+        tracing::info!("Attempting TCP console connection to {addr}");
 
         let stream = tokio::select! {
             result = TcpStream::connect(&addr) => {
@@ -39,17 +40,22 @@ pub async fn console_log_listener(
                     Ok(s) => s,
                     Err(e) => {
                         tracing::trace!("TCP console connect failed: {e}");
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        continue;
+                        // Wait for IP change or retry after 2s
+                        tokio::select! {
+                            _ = target_ip_rx.changed() => continue,
+                            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => continue,
+                            _ = shutdown_rx.changed() => return,
+                        }
                     }
                 }
             }
+            _ = target_ip_rx.changed() => continue,
             _ = shutdown_rx.changed() => return,
         };
 
         tracing::info!("Connected to roboRIO console at {addr}");
 
-        if let Err(e) = read_console_stream(stream, &log_tx, &power_tx, &mut shutdown_rx).await {
+        if let Err(e) = read_console_stream(stream, &log_tx, &power_tx, &mut shutdown_rx, &mut target_ip_rx, &version_tx).await {
             tracing::warn!("Console stream error: {e}");
         }
 
@@ -78,7 +84,9 @@ async fn read_console_stream(
     mut stream: TcpStream,
     log_tx: &mpsc::Sender<ConsoleMessage>,
     power_tx: &mpsc::Sender<PowerData>,
-    shutdown_rx: &mut tokio::sync::watch::Receiver<bool>,
+    shutdown_rx: &mut watch::Receiver<bool>,
+    target_ip_rx: &mut watch::Receiver<String>,
+    version_tx: &mpsc::Sender<VersionInfo>,
 ) -> Result<()> {
     // Accumulate power data across tags (0x04 and 0x05 arrive separately)
     let mut power = PowerData::default();
@@ -88,6 +96,10 @@ async fn read_console_stream(
         let size = tokio::select! {
             result = stream.read_u16() => result?,
             _ = shutdown_rx.changed() => return Ok(()),
+            _ = target_ip_rx.changed() => {
+                tracing::info!("Target IP changed, dropping TCP console connection");
+                return Ok(());
+            }
         };
 
         if size == 0 || size > 32768 {
@@ -98,6 +110,10 @@ async fn read_console_stream(
         tokio::select! {
             result = stream.read_exact(&mut payload) => result?,
             _ = shutdown_rx.changed() => return Ok(()),
+            _ = target_ip_rx.changed() => {
+                tracing::info!("Target IP changed, dropping TCP console connection");
+                return Ok(());
+            }
         };
 
         if payload.is_empty() {
@@ -211,6 +227,27 @@ async fn read_console_stream(
                     power.rail_faults_3v3 = u16::from_be_bytes([data[4], data[5]]);
                     let _ = power_tx.send(power.clone()).await;
                 }
+            }
+            // Version Info (0x0A): image(2+n) + wpilib(2+n) + rio(2+n)
+            0x0A => {
+                let mut offset = 0;
+                let image = read_prefixed_string(data, offset);
+                if let Some((ref _s, next)) = image {
+                    offset = next;
+                }
+                let wpilib = read_prefixed_string(data, offset);
+                if let Some((ref _s, next)) = wpilib {
+                    offset = next;
+                }
+                let rio = read_prefixed_string(data, offset);
+
+                let info = VersionInfo {
+                    image_version: image.map(|(s, _)| s).unwrap_or_default(),
+                    wpilib_version: wpilib.map(|(s, _)| s).unwrap_or_default(),
+                    rio_version: rio.map(|(s, _)| s).unwrap_or_default(),
+                };
+                tracing::info!("Version info: image={}, wpilib={}, rio={}", info.image_version, info.wpilib_version, info.rio_version);
+                let _ = version_tx.send(info).await;
             }
             // Other tags — log for debugging but don't display
             other => {

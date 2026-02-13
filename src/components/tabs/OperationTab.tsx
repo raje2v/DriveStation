@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useRobotStore } from "../../stores/robotStore";
 import { useSystemStore } from "../../stores/systemStore";
+import { useMatchTimer } from "../../hooks/useMatchTimer";
 import ModeButton from "../common/ModeButton";
 
 function isTauri(): boolean {
@@ -14,6 +15,7 @@ function safeInvoke(cmd: string, args?: Record<string, unknown>) {
 export default function OperationTab() {
   const { state, teamNumber, enabledTime } = useRobotStore();
   const { systemInfo } = useSystemStore();
+  const matchTimer = useMatchTimer();
 
   const handleSetMode = (mode: string) => {
     safeInvoke("set_mode", { mode });
@@ -94,6 +96,30 @@ export default function OperationTab() {
       {state.estopped && (
         <div className="bg-ds-red/20 border border-ds-red rounded p-2 text-center text-ds-red font-bold text-sm">
           EMERGENCY STOPPED — Reboot RoboRIO to clear
+        </div>
+      )}
+
+      {/* Match Timer */}
+      {matchTimer.phase !== "Idle" && (
+        <div
+          className={`bg-ds-panel rounded p-2 text-center ${
+            matchTimer.timeRemaining <= 10 && matchTimer.isRunning
+              ? "animate-pulse border border-ds-red"
+              : ""
+          }`}
+        >
+          <div className="text-[10px] text-ds-text-dim uppercase tracking-wider">
+            {matchTimer.phase}
+          </div>
+          <div
+            className={`text-2xl font-mono font-bold ${
+              matchTimer.timeRemaining <= 10 && matchTimer.isRunning
+                ? "text-ds-red"
+                : "text-ds-text"
+            }`}
+          >
+            {formatTime(matchTimer.timeRemaining)}
+          </div>
         </div>
       )}
 

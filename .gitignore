@@ -16,3 +16,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# MCP / Playwright local config
+.mcp.json
+.playwright-mcp/

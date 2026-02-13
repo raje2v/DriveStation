@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { useRobotStore, RobotState, DiagnosticData, ConnectionStatus } from "../stores/robotStore";
+import { useRobotStore, RobotState, DiagnosticData, ConnectionStatus, VersionInfo } from "../stores/robotStore";
 import { useLogStore, LogEntry } from "../stores/logStore";
 import { useGamepadStore, GamepadInfo } from "../stores/gamepadStore";
 import { useSystemStore } from "../stores/systemStore";
@@ -14,6 +14,7 @@ export function useTauriEvents() {
   const setRobotState = useRobotStore((s) => s.setRobotState);
   const setDiagnostics = useRobotStore((s) => s.setDiagnostics);
   const setConnectionStatus = useRobotStore((s) => s.setConnectionStatus);
+  const setVersionInfo = useRobotStore((s) => s.setVersionInfo);
   const addEntry = useLogStore((s) => s.addEntry);
   const setGamepads = useGamepadStore((s) => s.setGamepads);
   const setSystemInfo = useSystemStore((s) => s.setSystemInfo);
@@ -59,8 +60,12 @@ export function useTauriEvents() {
       setPowerData(event.payload);
     }).then((u) => unlisten.push(u));
 
+    listen<VersionInfo>("version-info", (event) => {
+      setVersionInfo(event.payload);
+    }).then((u) => unlisten.push(u));
+
     return () => {
       unlisten.forEach((u) => u());
     };
-  }, [setRobotState, setDiagnostics, setConnectionStatus, addEntry, setGamepads, setSystemInfo, setPowerData]);
+  }, [setRobotState, setDiagnostics, setConnectionStatus, addEntry, setGamepads, setSystemInfo, setPowerData, setVersionInfo]);
 }
