@@ -65,24 +65,27 @@ jobs:
       - name: Collect artifacts
         shell: bash
         run: |
-          # When --target matches the native arch, Cargo outputs to target/release/bundle/
-          # When cross-compiling, it outputs to target/{triple}/release/bundle/
+          # Tauri splits output across two dirs: installers in target/{triple}/release/bundle/
+          # and updater bundles (.tar.gz, .sig) in target/release/bundle/. Search both.
           TRIPLE_BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
           NATIVE_BASE="src-tauri/target/release/bundle"
-          if [ -d "$TRIPLE_BASE" ]; then
-            BASE="$TRIPLE_BASE"
-          else
-            BASE="$NATIVE_BASE"
-          fi
-          echo "Using bundle dir: $BASE"
-          echo "=== All bundle files ==="
-          find "$BASE" -type f | sort
+
+          echo "=== Triple path ($TRIPLE_BASE) ==="
+          find "$TRIPLE_BASE" -type f 2>/dev/null | sort || echo "(not found)"
+          echo "=== Native path ($NATIVE_BASE) ==="
+          find "$NATIVE_BASE" -type f 2>/dev/null | sort || echo "(not found)"
 
           mkdir -p /tmp/artifacts
-          # Copy installers (non-sig files)
-          find "$BASE" \( -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.msi" -o -name "*.AppImage" -o -name "*-setup.exe" -o -name "*.app.tar.gz" -o -name "*.nsis.zip" -o -name "*.AppImage.tar.gz" \) -not -name "*.sig" -type f -exec cp {} /tmp/artifacts/ \;
-          # Copy signature files
-          find "$BASE" -name "*.sig" -type f -exec cp {} /tmp/artifacts/ \;
+          PATTERNS='-name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.msi" -o -name "*.AppImage" -o -name "*-setup.exe" -o -name "*.app.tar.gz" -o -name "*.nsis.zip" -o -name "*.AppImage.tar.gz"'
+
+          # Collect from both paths (duplicates overwritten harmlessly)
+          for BASE in "$TRIPLE_BASE" "$NATIVE_BASE"; do
+            [ -d "$BASE" ] || continue
+            # Copy installers and updater bundles
+            find "$BASE" \( -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.msi" -o -name "*.AppImage" -o -name "*-setup.exe" -o -name "*.app.tar.gz" -o -name "*.nsis.zip" -o -name "*.AppImage.tar.gz" \) -not -name "*.sig" -type f -exec cp {} /tmp/artifacts/ \;
+            # Copy signature files
+            find "$BASE" -name "*.sig" -type f -exec cp {} /tmp/artifacts/ \;
+          done
 
           # macOS: rename app.tar.gz to include architecture (both builds produce DriveStation.app.tar.gz)
           if [ -f "/tmp/artifacts/DriveStation.app.tar.gz" ] && [ -n "${{ matrix.arch }}" ]; then
