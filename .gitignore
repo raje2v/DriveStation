@@ -20,3 +20,6 @@ Thumbs.db
 # MCP / Playwright local config
 .mcp.json
 .playwright-mcp/
+
+# Tauri signing keys (NEVER commit)
+.tauri/

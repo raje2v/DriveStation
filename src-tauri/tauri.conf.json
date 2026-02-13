@@ -34,5 +34,12 @@
       "icons/icon.ico"
     ]
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdENzU2NTU2MEM2NzZCNTEKUldSUmEyY01WbVYxZlFENStrdFplRlNhbXE3bUZMQ2d2cFVhZG9lZFJPYkpYaSswU05Od1pwS0IK",
+      "endpoints": [
+        "https://github.com/raje2v/DriveStation/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

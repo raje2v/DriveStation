@@ -13,6 +13,7 @@ import StatusBar from "./components/StatusBar";
 import CompactBar from "./components/CompactBar";
 import Console from "./components/Console";
 import Charts from "./components/Charts";
+import UpdateChecker from "./components/UpdateChecker";
 
 type Tab = "operation" | "diagnostics" | "power" | "setup" | "usb";
 type RightPanel = "console" | "charts" | "both";
@@ -165,6 +166,7 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-ds-bg">
+      <UpdateChecker />
       {/* Tab Bar */}
       <div className="flex items-center bg-ds-panel border-b border-ds-border">
         {TABS.map((tab) => (
