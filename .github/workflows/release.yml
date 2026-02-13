@@ -109,13 +109,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p /tmp/updater-sig
-          # Find the primary updater .sig file
-          SIG=$(find /tmp/artifacts -name "*.app.tar.gz.sig" -o -name "*.nsis.zip.sig" -o -name "*.AppImage.tar.gz.sig" 2>/dev/null | head -1)
+          # Tauri v2 updater sig files:
+          #   macOS: .app.tar.gz.sig
+          #   Linux: .AppImage.sig (not .tar.gz.sig)
+          #   Windows: -setup.exe.sig (not .nsis.zip.sig)
+          SIG=$(find /tmp/artifacts -name "*.app.tar.gz.sig" -o -name "*.AppImage.sig" -o -name "*-setup.exe.sig" 2>/dev/null | head -1)
           if [ -n "$SIG" ]; then
             echo "Found updater sig: $SIG"
             cp "$SIG" "/tmp/updater-sig/${{ matrix.label }}.sig"
           else
             echo "WARNING: No updater signature file found"
+            echo "Available files:"
+            ls -la /tmp/artifacts/ 2>/dev/null
           fi
 
       - name: Upload signature artifact
@@ -173,9 +178,9 @@ jobs:
             --arg mac_x64_sig "$MAC_X64_SIG" \
             --arg mac_x64_url "$BASE_URL/DriveStation_x64.app.tar.gz" \
             --arg linux_sig "$LINUX_SIG" \
-            --arg linux_url "$BASE_URL/DriveStation_${VERSION}_amd64.AppImage.tar.gz" \
+            --arg linux_url "$BASE_URL/DriveStation_${VERSION}_amd64.AppImage" \
             --arg win_sig "$WIN_SIG" \
-            --arg win_url "$BASE_URL/DriveStation_${VERSION}_x64-setup.nsis.zip" \
+            --arg win_url "$BASE_URL/DriveStation_${VERSION}_x64-setup.exe" \
             '{
               version: $version,
               notes: $notes,
