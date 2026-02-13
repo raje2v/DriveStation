@@ -17,13 +17,18 @@ jobs:
         include:
           - platform: macos-latest
             label: macOS-arm64
+            target: aarch64-apple-darwin
+            arch: aarch64
           - platform: macos-latest
-            target: x86_64-apple-darwin
             label: macOS-x64
+            target: x86_64-apple-darwin
+            arch: x64
           - platform: ubuntu-22.04
             label: Linux-x64
+            target: x86_64-unknown-linux-gnu
           - platform: windows-latest
             label: Windows-x64
+            target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -52,45 +57,77 @@ jobs:
         run: pnpm install
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'DriveStation ${{ github.ref_name }}'
-          releaseBody: 'Cross-platform FRC Driver Station - Beta'
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+        run: npx tauri build --target ${{ matrix.target }}
 
-      - name: Collect updater signature
-        id: sig
+      - name: Collect artifacts
         shell: bash
         run: |
-          if [ -n "${{ matrix.target }}" ]; then
-            BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          # When --target matches the native arch, Cargo outputs to target/release/bundle/
+          # When cross-compiling, it outputs to target/{triple}/release/bundle/
+          TRIPLE_BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          NATIVE_BASE="src-tauri/target/release/bundle"
+          if [ -d "$TRIPLE_BASE" ]; then
+            BASE="$TRIPLE_BASE"
           else
-            BASE="src-tauri/target/release/bundle"
+            BASE="$NATIVE_BASE"
           fi
-          echo "=== All .sig files ==="
-          find "$BASE" -name "*.sig" -type f 2>/dev/null || echo "No .sig files found"
-          # Save the updater-relevant signature to a file
-          mkdir -p /tmp/updater-sigs
-          SIG_FILE=$(find "$BASE" -name "*.app.tar.gz.sig" -o -name "*.nsis.zip.sig" -o -name "*.AppImage.tar.gz.sig" 2>/dev/null | head -1)
-          if [ -n "$SIG_FILE" ]; then
-            cp "$SIG_FILE" "/tmp/updater-sigs/${{ matrix.label }}.sig"
-            echo "Saved signature: $(cat "$SIG_FILE" | head -c 80)..."
+          echo "Using bundle dir: $BASE"
+          echo "=== All bundle files ==="
+          find "$BASE" -type f | sort
+
+          mkdir -p /tmp/artifacts
+          # Copy installers (non-sig files)
+          find "$BASE" \( -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.msi" -o -name "*.AppImage" -o -name "*-setup.exe" -o -name "*.app.tar.gz" -o -name "*.nsis.zip" -o -name "*.AppImage.tar.gz" \) -not -name "*.sig" -type f -exec cp {} /tmp/artifacts/ \;
+          # Copy signature files
+          find "$BASE" -name "*.sig" -type f -exec cp {} /tmp/artifacts/ \;
+
+          # macOS: rename app.tar.gz to include architecture (both builds produce DriveStation.app.tar.gz)
+          if [ -f "/tmp/artifacts/DriveStation.app.tar.gz" ] && [ -n "${{ matrix.arch }}" ]; then
+            mv "/tmp/artifacts/DriveStation.app.tar.gz" "/tmp/artifacts/DriveStation_${{ matrix.arch }}.app.tar.gz"
+            if [ -f "/tmp/artifacts/DriveStation.app.tar.gz.sig" ]; then
+              mv "/tmp/artifacts/DriveStation.app.tar.gz.sig" "/tmp/artifacts/DriveStation_${{ matrix.arch }}.app.tar.gz.sig"
+            fi
+          fi
+
+          echo "=== Collected artifacts ==="
+          ls -la /tmp/artifacts/
+
+      - name: Upload artifacts to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          # Create release if it doesn't exist
+          gh release view "$TAG" --repo ${{ github.repository }} 2>/dev/null || \
+            gh release create "$TAG" --repo ${{ github.repository }} --title "DriveStation $TAG" --notes "Cross-platform FRC Driver Station - Beta" --draft
+          # Upload all artifacts
+          for f in /tmp/artifacts/*; do
+            echo "Uploading: $(basename $f)"
+            gh release upload "$TAG" "$f" --repo ${{ github.repository }} --clobber || true
+          done
+
+      - name: Save updater signature
+        shell: bash
+        run: |
+          mkdir -p /tmp/updater-sig
+          # Find the primary updater .sig file (renamed for macOS, original name for others)
+          SIG=$(find /tmp/artifacts -name "*.app.tar.gz.sig" -o -name "*.nsis.zip.sig" -o -name "*.AppImage.tar.gz.sig" 2>/dev/null | head -1)
+          if [ -n "$SIG" ]; then
+            echo "Found updater sig: $SIG"
+            cp "$SIG" "/tmp/updater-sig/${{ matrix.label }}.sig"
           else
             echo "WARNING: No updater signature file found"
           fi
 
-      - name: Upload updater signature
+      - name: Upload signature artifact
         uses: actions/upload-artifact@v4
         with:
           name: sig-${{ matrix.label }}
-          path: /tmp/updater-sigs/
+          path: /tmp/updater-sig/
           if-no-files-found: warn
 
   updater-json:
@@ -105,7 +142,13 @@ jobs:
           path: sigs
 
       - name: List downloaded signatures
-        run: find sigs -type f
+        run: |
+          echo "=== Signature artifacts ==="
+          find sigs -type f 2>/dev/null || echo "No sig files found"
+          echo "---"
+          for f in $(find sigs -type f 2>/dev/null); do
+            echo "$f: $(cat "$f" | head -c 80)"
+          done
 
       - name: Assemble and upload latest.json
         env:
@@ -113,13 +156,11 @@ jobs:
         run: |
           VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
           TAG="${{ github.ref_name }}"
-          BASE_URL="https://github.com/raje2v/DriveStation/releases/download/$TAG"
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/$TAG"
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          # Read signature from artifact file
           read_sig() {
-            local label="$1"
-            local file="sigs/sig-${label}/${label}.sig"
+            local file="sigs/sig-${1}/${1}.sig"
             if [ -f "$file" ]; then cat "$file"; else echo ""; fi
           }
 
@@ -128,7 +169,6 @@ jobs:
           WIN_SIG=$(read_sig "Windows-x64")
           LINUX_SIG=$(read_sig "Linux-x64")
 
-          # Build JSON with jq for proper escaping
           jq -n \
             --arg version "$VERSION" \
             --arg notes "DriveStation $TAG" \
@@ -155,4 +195,4 @@ jobs:
 
           echo "=== latest.json ==="
           cat latest.json
-          gh release upload "$TAG" latest.json --clobber
+          gh release upload "$TAG" latest.json --repo ${{ github.repository }} --clobber
