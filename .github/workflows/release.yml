@@ -16,16 +16,13 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            target: aarch64-apple-darwin
             label: macOS-arm64
           - platform: macos-latest
             target: x86_64-apple-darwin
             label: macOS-x64
           - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
             label: Linux-x64
           - platform: windows-latest
-            target: x86_64-pc-windows-msvc
             label: Windows-x64
 
     runs-on: ${{ matrix.platform }}
@@ -67,4 +64,4 @@ jobs:
           releaseDraft: true
           prerelease: false
           updaterJsonKeepUniversal: true
-          args: --target ${{ matrix.target }}
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
