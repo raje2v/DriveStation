@@ -37,7 +37,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEzNTVBQkFCQjgwQzJGMzkKUldRNUx3eTRxNnRWbytlY0hQaCtCWkpvOUJwTC9XVFY2Lyt1N1pkWmp5QkpQTXFETVQ2OUNrSTAK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1MjE0RkM4OUEzMTIzQzAKUldUQUl6R2F5RThoUllXTW43cFZ2bnMxOFRjbWxDQ0pPREMwY0o0YThSd0pDSXo5clhRRXlNYlUK",
       "endpoints": [
         "https://github.com/raje2v/DriveStation/releases/latest/download/latest.json"
       ]
