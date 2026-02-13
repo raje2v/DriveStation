@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for DriveStation",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "fs:default",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive"
+  ]
+}
