@@ -65,25 +65,32 @@ jobs:
           prerelease: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
-      # Upload .sig files as artifacts for the updater JSON assembly job
-      - name: Find signature files
-        id: sigs
+      - name: Collect updater signature
+        id: sig
         shell: bash
         run: |
           if [ -n "${{ matrix.target }}" ]; then
-            BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
+            BASE="src-tauri/target/${{ matrix.target }}/release/bundle"
           else
-            BUNDLE_DIR="src-tauri/target/release/bundle"
+            BASE="src-tauri/target/release/bundle"
           fi
-          echo "bundle_dir=$BUNDLE_DIR" >> "$GITHUB_OUTPUT"
-          find "$BUNDLE_DIR" -name "*.sig" -type f 2>/dev/null || true
+          echo "=== All .sig files ==="
+          find "$BASE" -name "*.sig" -type f 2>/dev/null || echo "No .sig files found"
+          # Save the updater-relevant signature to a file
+          mkdir -p /tmp/updater-sigs
+          SIG_FILE=$(find "$BASE" -name "*.app.tar.gz.sig" -o -name "*.nsis.zip.sig" -o -name "*.AppImage.tar.gz.sig" 2>/dev/null | head -1)
+          if [ -n "$SIG_FILE" ]; then
+            cp "$SIG_FILE" "/tmp/updater-sigs/${{ matrix.label }}.sig"
+            echo "Saved signature: $(cat "$SIG_FILE" | head -c 80)..."
+          else
+            echo "WARNING: No updater signature file found"
+          fi
 
-      - name: Upload signature artifacts
+      - name: Upload updater signature
         uses: actions/upload-artifact@v4
         with:
-          name: sigs-${{ matrix.label }}
-          path: |
-            ${{ steps.sigs.outputs.bundle_dir }}/**/*.sig
+          name: sig-${{ matrix.label }}
+          path: /tmp/updater-sigs/
           if-no-files-found: warn
 
   updater-json:
@@ -92,91 +99,60 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all signature artifacts
+      - name: Download all signatures
         uses: actions/download-artifact@v4
         with:
           path: sigs
 
-      - name: Read version from tauri.conf.json
-        id: version
-        run: |
-          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $VERSION"
+      - name: List downloaded signatures
+        run: find sigs -type f
 
-      - name: List all signature files
-        run: find sigs -name "*.sig" -type f
-
-      - name: Assemble latest.json
-        shell: bash
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="${{ github.ref_name }}"
-          REPO="raje2v/DriveStation"
-          BASE_URL="https://github.com/$REPO/releases/download/$TAG"
-          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          # Read signatures from uploaded artifacts
-          read_sig() {
-            local pattern="$1"
-            local file=$(find sigs -name "$pattern" -type f | head -1)
-            if [ -n "$file" ]; then
-              cat "$file"
-            else
-              echo ""
-            fi
-          }
-
-          # macOS arm64
-          MAC_ARM_SIG=$(read_sig "DriveStation.app.tar.gz.sig" | head -1)
-          # macOS x64
-          MAC_X64_SIG=$(find sigs/sigs-macOS-x64 -name "DriveStation.app.tar.gz.sig" -type f 2>/dev/null | head -1)
-          if [ -n "$MAC_X64_SIG" ]; then
-            MAC_X64_SIG=$(cat "$MAC_X64_SIG")
-          fi
-          # If only one macOS sig found, check which it is
-          if [ -z "$MAC_ARM_SIG" ]; then
-            MAC_ARM_SIG=$(find sigs/sigs-macOS-arm64 -name "DriveStation.app.tar.gz.sig" -type f 2>/dev/null | head -1)
-            if [ -n "$MAC_ARM_SIG" ]; then MAC_ARM_SIG=$(cat "$MAC_ARM_SIG"); fi
-          fi
-
-          # Windows NSIS
-          WIN_NSIS_SIG=$(read_sig "*.nsis.zip.sig")
-          # Linux AppImage
-          LINUX_SIG=$(read_sig "*.AppImage.tar.gz.sig")
-
-          cat > latest.json << ENDJSON
-          {
-            "version": "$VERSION",
-            "notes": "DriveStation $TAG - Cross-platform FRC Driver Station",
-            "pub_date": "$PUB_DATE",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "$MAC_ARM_SIG",
-                "url": "$BASE_URL/DriveStation_aarch64.app.tar.gz"
-              },
-              "darwin-x86_64": {
-                "signature": "$MAC_X64_SIG",
-                "url": "$BASE_URL/DriveStation_x64.app.tar.gz"
-              },
-              "linux-x86_64": {
-                "signature": "$LINUX_SIG",
-                "url": "$BASE_URL/DriveStation_${VERSION}_amd64.AppImage.tar.gz"
-              },
-              "windows-x86_64": {
-                "signature": "$WIN_NSIS_SIG",
-                "url": "$BASE_URL/DriveStation_${VERSION}_x64-setup.nsis.zip"
-              }
-            }
-          }
-          ENDJSON
-
-          echo "Generated latest.json:"
-          cat latest.json
-
-      - name: Upload latest.json to release
+      - name: Assemble and upload latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
           TAG="${{ github.ref_name }}"
+          BASE_URL="https://github.com/raje2v/DriveStation/releases/download/$TAG"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Read signature from artifact file
+          read_sig() {
+            local label="$1"
+            local file="sigs/sig-${label}/${label}.sig"
+            if [ -f "$file" ]; then cat "$file"; else echo ""; fi
+          }
+
+          MAC_ARM_SIG=$(read_sig "macOS-arm64")
+          MAC_X64_SIG=$(read_sig "macOS-x64")
+          WIN_SIG=$(read_sig "Windows-x64")
+          LINUX_SIG=$(read_sig "Linux-x64")
+
+          # Build JSON with jq for proper escaping
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "DriveStation $TAG" \
+            --arg pub_date "$PUB_DATE" \
+            --arg mac_arm_sig "$MAC_ARM_SIG" \
+            --arg mac_arm_url "$BASE_URL/DriveStation_aarch64.app.tar.gz" \
+            --arg mac_x64_sig "$MAC_X64_SIG" \
+            --arg mac_x64_url "$BASE_URL/DriveStation_x64.app.tar.gz" \
+            --arg linux_sig "$LINUX_SIG" \
+            --arg linux_url "$BASE_URL/DriveStation_${VERSION}_amd64.AppImage.tar.gz" \
+            --arg win_sig "$WIN_SIG" \
+            --arg win_url "$BASE_URL/DriveStation_${VERSION}_x64-setup.nsis.zip" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: $mac_arm_sig, url: $mac_arm_url },
+                "darwin-x86_64": { signature: $mac_x64_sig, url: $mac_x64_url },
+                "linux-x86_64": { signature: $linux_sig, url: $linux_url },
+                "windows-x86_64": { signature: $win_sig, url: $win_url }
+              }
+            }' > latest.json
+
+          echo "=== latest.json ==="
+          cat latest.json
           gh release upload "$TAG" latest.json --clobber
