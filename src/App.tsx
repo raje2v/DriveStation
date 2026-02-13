@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTauriEvents } from "./hooks/useTauriEvents";
 import { useGamepadPolling } from "./hooks/useGamepad";
+import { useCompactMode } from "./hooks/useCompactMode";
 import { useRobotStore } from "./stores/robotStore";
 import OperationTab from "./components/tabs/OperationTab";
 import DiagnosticsTab from "./components/tabs/DiagnosticsTab";
 import SetupTab from "./components/tabs/SetupTab";
 import USBDevicesTab from "./components/tabs/USBDevicesTab";
 import StatusBar from "./components/StatusBar";
+import CompactBar from "./components/CompactBar";
 import Console from "./components/Console";
 import Charts from "./components/Charts";
 
@@ -33,6 +35,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("operation");
   const [rightPanel, setRightPanel] = useState<RightPanel>("console");
   const { state, setEnabledTime } = useRobotStore();
+  const { compactMode, snapCompact, restoreFromCompact } = useCompactMode();
   const enabledStartRef = useRef<number | null>(null);
   // Track held keys for the three-key enable combo: [ ] backslash
   const heldKeys = useRef<Set<string>>(new Set());
@@ -74,6 +77,17 @@ export default function App() {
 
     heldKeys.current.add(e.key);
 
+    // Compact mode toggle: Cmd+Shift+M (Mac) / Ctrl+Shift+M (Win/Linux)
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "M") {
+      e.preventDefault();
+      if (compactMode) {
+        restoreFromCompact();
+      } else {
+        snapCompact("top");
+      }
+      return;
+    }
+
     // Enable: [ + ] + \ (all three held)
     if (
       heldKeys.current.has("[") &&
@@ -95,7 +109,7 @@ export default function App() {
         safeInvoke("estop_robot");
         break;
     }
-  }, []);
+  }, [compactMode, snapCompact, restoreFromCompact]);
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
     heldKeys.current.delete(e.key);
@@ -123,10 +137,14 @@ export default function App() {
     }
   };
 
+  if (compactMode) {
+    return <CompactBar onExpand={restoreFromCompact} />;
+  }
+
   return (
     <div className="h-screen flex flex-col bg-ds-bg">
       {/* Tab Bar */}
-      <div className="flex bg-ds-panel border-b border-ds-border">
+      <div className="flex items-center bg-ds-panel border-b border-ds-border">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -140,6 +158,23 @@ export default function App() {
             {tab.label}
           </button>
         ))}
+        <div className="flex-1" />
+        <div className="flex items-center gap-1 mr-2">
+          <button
+            onClick={() => snapCompact("top")}
+            className="px-2 py-1 rounded text-[11px] text-ds-text-dim hover:text-ds-text hover:bg-ds-border transition-colors"
+            title="Snap to top (Cmd+Shift+M)"
+          >
+            Snap Top
+          </button>
+          <button
+            onClick={() => snapCompact("bottom")}
+            className="px-2 py-1 rounded text-[11px] text-ds-text-dim hover:text-ds-text hover:bg-ds-border transition-colors"
+            title="Snap to bottom"
+          >
+            Snap Bottom
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}

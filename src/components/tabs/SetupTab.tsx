@@ -127,6 +127,14 @@ export default function SetupTab() {
             <span className="text-ds-text-dim">E-Stop</span>
             <kbd className="bg-ds-bg px-2 py-0.5 rounded font-mono">Space</kbd>
           </div>
+          <div className="flex justify-between">
+            <span className="text-ds-text-dim">Compact Mode</span>
+            <div className="flex gap-0.5">
+              <kbd className="bg-ds-bg px-1.5 py-0.5 rounded font-mono">&#8984;</kbd>
+              <kbd className="bg-ds-bg px-1.5 py-0.5 rounded font-mono">&#8679;</kbd>
+              <kbd className="bg-ds-bg px-1.5 py-0.5 rounded font-mono">M</kbd>
+            </div>
+          </div>
         </div>
       </section>
     </div>
