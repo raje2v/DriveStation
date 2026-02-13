@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useRobotStore } from "../../stores/robotStore";
+import { useSystemStore } from "../../stores/systemStore";
 import ModeButton from "../common/ModeButton";
 
 function isTauri(): boolean {
@@ -12,6 +13,7 @@ function safeInvoke(cmd: string, args?: Record<string, unknown>) {
 
 export default function OperationTab() {
   const { state, teamNumber, enabledTime } = useRobotStore();
+  const { systemInfo } = useSystemStore();
 
   const handleSetMode = (mode: string) => {
     safeInvoke("set_mode", { mode });
@@ -38,7 +40,7 @@ export default function OperationTab() {
   const canEnable = state.connected && !state.estopped;
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-3 p-4">
       {/* Mode Selection */}
       <div className="flex flex-col gap-2">
         <span className="text-xs text-ds-text-dim uppercase tracking-wide">Mode</span>
@@ -80,7 +82,7 @@ export default function OperationTab() {
           onClick={handleDisable}
           className={`w-full py-3 rounded font-bold text-sm uppercase tracking-wider transition-colors border-2 ${
             !state.enabled
-              ? "bg-ds-disable border-ds-disable text-white shadow-[0_0_8px_var(--color-ds-red)]"
+              ? "bg-ds-panel border-ds-border text-ds-text"
               : "bg-transparent border-ds-disable text-ds-disable hover:bg-ds-disable/20"
           }`}
         >
@@ -96,7 +98,7 @@ export default function OperationTab() {
       )}
 
       {/* Info */}
-      <div className="flex flex-col gap-1 text-sm mt-2">
+      <div className="flex flex-col gap-1 text-sm">
         <div className="flex justify-between">
           <span className="text-ds-text-dim">Elapsed</span>
           <span>{formatTime(enabledTime)}</span>
@@ -107,12 +109,46 @@ export default function OperationTab() {
         </div>
       </div>
 
+      {/* PC Status */}
+      <div className="flex flex-col gap-1 text-sm">
+        <span className="text-xs text-ds-text-dim uppercase tracking-wide">PC Status</span>
+        <div className="flex justify-between">
+          <span className="text-ds-text-dim">Battery</span>
+          <span>
+            {systemInfo.pcBattery !== null ? (
+              <>
+                {systemInfo.pcCharging ? "⚡ " : ""}
+                {systemInfo.pcBattery.toFixed(0)}%
+              </>
+            ) : (
+              "N/A"
+            )}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-ds-text-dim text-sm">CPU</span>
+          <div className="flex-1 h-2 bg-ds-bg rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all ${
+                systemInfo.pcCpu > 80
+                  ? "bg-ds-red"
+                  : systemInfo.pcCpu > 60
+                    ? "bg-ds-orange"
+                    : "bg-ds-green"
+              }`}
+              style={{ width: `${Math.min(100, systemInfo.pcCpu)}%` }}
+            />
+          </div>
+          <span className="text-xs w-10 text-right">{systemInfo.pcCpu.toFixed(0)}%</span>
+        </div>
+      </div>
+
       {/* E-Stop Button */}
       <button
         onClick={handleEStop}
         className="w-full py-2 mt-auto rounded bg-ds-red text-white font-bold text-xs uppercase tracking-wider hover:bg-red-700 active:shadow-[0_0_12px_var(--color-ds-red)] transition-colors"
       >
-        Emergency Stop (Space)
+        Emergency Stop
       </button>
     </div>
   );

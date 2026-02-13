@@ -63,6 +63,7 @@ pub struct RobotState {
     pub mode: Mode,
     pub battery_voltage: f32,
     pub brownout: bool,
+    pub fms_connected: bool,
     pub sequence_number: u16,
 }
 
@@ -76,6 +77,7 @@ impl Default for RobotState {
             mode: Mode::Teleoperated,
             battery_voltage: 0.0,
             brownout: false,
+            fms_connected: false,
             sequence_number: 0,
         }
     }
@@ -121,6 +123,52 @@ impl Default for DiagnosticData {
             can_tx_full: 0,
             can_rx_error: 0,
             can_tx_error: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PowerData {
+    pub disable_count_comms: u16,
+    pub disable_count_12v: u16,
+    pub rail_faults_6v: u16,
+    pub rail_faults_5v: u16,
+    pub rail_faults_3v3: u16,
+}
+
+impl Default for PowerData {
+    fn default() -> Self {
+        Self {
+            disable_count_comms: 0,
+            disable_count_12v: 0,
+            rail_faults_6v: 0,
+            rail_faults_5v: 0,
+            rail_faults_3v3: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectionStatus {
+    pub enet_link: bool,
+    pub enet_ip: Option<String>,
+    pub robot_radio: bool,
+    pub robot: bool,
+    pub fms: bool,
+    pub wifi: bool,
+    pub usb: bool,
+}
+
+impl Default for ConnectionStatus {
+    fn default() -> Self {
+        Self {
+            enet_link: false,
+            enet_ip: None,
+            robot_radio: false,
+            robot: false,
+            fms: false,
+            wifi: false,
+            usb: false,
         }
     }
 }

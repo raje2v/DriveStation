@@ -16,7 +16,7 @@ interface CompactBarProps {
 }
 
 export default function CompactBar({ onExpand }: CompactBarProps) {
-  const { state, teamNumber, enabledTime } = useRobotStore();
+  const { state, connectionStatus, teamNumber, enabledTime } = useRobotStore();
   const { gamepads } = useGamepadStore();
 
   const canEnable = state.connected && !state.estopped;
@@ -87,7 +87,12 @@ export default function CompactBar({ onExpand }: CompactBarProps) {
 
       {/* Status LEDs */}
       <div className="flex items-center gap-3">
-        <StatusLED active={state.connected} color="green" label="Comms" />
+        <StatusLED active={connectionStatus.enet_link} color="green" label="Enet" />
+        <StatusLED active={connectionStatus.robot_radio} color="green" label="Radio" />
+        <StatusLED active={connectionStatus.robot} color="green" label="Robot" />
+        <StatusLED active={connectionStatus.fms} color="green" label="FMS" />
+        <StatusLED active={connectionStatus.wifi} color="green" label="Wifi" />
+        <StatusLED active={connectionStatus.usb} color="green" label="USB" />
         <StatusLED active={state.code_running} color="green" label="Code" />
         <StatusLED
           active={gamepads.length > 0}

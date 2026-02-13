@@ -25,3 +25,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 parking_lot = "0.12"
 byteorder = "1"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+battery = "0.7"
+if-addrs = "0.13"

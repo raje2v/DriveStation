@@ -113,10 +113,13 @@ export default function SetupTab() {
         <div className="bg-ds-panel rounded p-3 text-xs flex flex-col gap-1">
           <div className="flex justify-between">
             <span className="text-ds-text-dim">Enable</span>
-            <div className="flex gap-0.5">
+            <div className="flex items-center gap-0.5">
               <kbd className="bg-ds-bg px-1.5 py-0.5 rounded font-mono">[</kbd>
+              <span className="text-ds-text-dim">+</span>
               <kbd className="bg-ds-bg px-1.5 py-0.5 rounded font-mono">]</kbd>
+              <span className="text-ds-text-dim">+</span>
               <kbd className="bg-ds-bg px-1.5 py-0.5 rounded font-mono">\</kbd>
+              <span className="text-ds-text-dim ml-1">(hold together)</span>
             </div>
           </div>
           <div className="flex justify-between">

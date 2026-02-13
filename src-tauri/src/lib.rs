@@ -3,7 +3,9 @@ mod discovery;
 mod events;
 mod gamepad;
 mod logging;
+mod network;
 mod protocol;
+mod system_info;
 
 use std::sync::Arc;
 
@@ -13,7 +15,7 @@ use tokio::sync::mpsc;
 
 use gamepad::manager::GamepadManager;
 use protocol::connection::{protocol_loop, DsCommand, DsEvent};
-use protocol::types::{ConsoleMessage, JoystickState};
+use protocol::types::{ConsoleMessage, JoystickState, PowerData};
 
 pub struct AppState {
     pub cmd_tx: mpsc::Sender<DsCommand>,
@@ -62,6 +64,8 @@ pub fn run() {
             commands::config::set_target_ip,
             commands::gamepad::get_gamepads,
             commands::gamepad::reorder_gamepads,
+            commands::gamepad::lock_gamepad_slot,
+            commands::gamepad::unlock_gamepad_slot,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -75,12 +79,15 @@ pub fn run() {
 
             // Spawn TCP console log listener (connects to localhost initially)
             let (log_tx, mut log_rx) = mpsc::channel::<ConsoleMessage>(256);
+            let (power_tx, mut power_rx) = mpsc::channel::<PowerData>(64);
             let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
             let event_tx_log = event_tx_console.clone();
+            let event_tx_power = event_tx_console.clone();
 
             tauri::async_runtime::spawn(logging::console_log_listener(
                 "127.0.0.1".to_string(),
                 log_tx,
+                power_tx,
                 shutdown_rx,
             ));
 
@@ -91,8 +98,19 @@ pub fn run() {
                 }
             });
 
+            // Bridge power data to the event system
+            tauri::async_runtime::spawn(async move {
+                while let Some(data) = power_rx.recv().await {
+                    let _ = event_tx_power.send(DsEvent::PowerData(data)).await;
+                }
+            });
+
             // Store shutdown sender for cleanup (not strictly needed for now)
             std::mem::forget(shutdown_tx);
+
+            // Spawn system info polling (1Hz — PC battery + CPU)
+            let event_tx_sysinfo = event_tx_console.clone();
+            tauri::async_runtime::spawn(system_info::system_info_loop(event_tx_sysinfo));
 
             // Spawn gamepad polling thread (~50Hz)
             // Uses a std::thread because gilrs needs a synchronous polling loop

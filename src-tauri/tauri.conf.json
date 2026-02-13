@@ -14,10 +14,10 @@
       {
         "title": "DriveStation - FRC Driver Station",
         "width": 900,
-        "height": 520,
+        "height": 600,
         "resizable": true,
         "minWidth": 800,
-        "minHeight": 450
+        "minHeight": 550
       }
     ],
     "security": {},

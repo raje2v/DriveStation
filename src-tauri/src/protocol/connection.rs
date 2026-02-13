@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
+use crate::system_info::SystemInfoData;
 use super::types::*;
 
 /// Convert days since Unix epoch to (year, month, day)
@@ -149,6 +150,7 @@ fn parse_inbound_packet(data: &[u8], robot_state: &mut RobotState, diag: &mut Di
     let status = data[3];
     robot_state.estopped = (status & 0x80) != 0;
     robot_state.brownout = (status & 0x10) != 0;
+    robot_state.fms_connected = (status & 0x08) != 0;
     robot_state.enabled = (status & 0x04) != 0;
     robot_state.mode = Mode::from_bits(status);
 
@@ -277,6 +279,9 @@ pub enum DsEvent {
     Diagnostics(DiagnosticData),
     Console(ConsoleMessage),
     GamepadUpdate(GamepadUpdate),
+    SystemInfo(SystemInfoData),
+    ConnectionStatus(ConnectionStatus),
+    PowerData(PowerData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,6 +297,7 @@ pub struct GamepadInfo {
     pub axes: Vec<f32>,
     pub buttons: Vec<bool>,
     pub povs: Vec<i16>,
+    pub locked: bool,
 }
 
 /// Resolves the target IP for a given team number
@@ -311,7 +317,7 @@ pub async fn protocol_loop(
     event_tx: mpsc::Sender<DsEvent>,
     joystick_state: Arc<RwLock<Vec<JoystickState>>>,
 ) {
-    let mut _team_number: u32 = 0;
+    let mut team_number: u32 = 0;
     let mut target_ip = team_to_ip(0);
     let mut ds_state = DsState::default();
     let mut robot_state = RobotState::default();
@@ -352,7 +358,7 @@ pub async fn protocol_loop(
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     DsCommand::SetTeamNumber(team) => {
-                        _team_number = team;
+                        team_number = team;
                         target_ip = team_to_ip(team);
                         tracing::info!("Team set to {team}, target IP: {target_ip}");
                         // Reset connection state
@@ -448,6 +454,21 @@ pub async fn protocol_loop(
             _ = event_interval.tick() => {
                 let _ = event_tx.send(DsEvent::RobotState(robot_state.clone())).await;
                 let _ = event_tx.send(DsEvent::Diagnostics(diag.clone())).await;
+
+                // Connection status breakdown
+                let net = crate::network::check_interfaces();
+                let radio_ip = crate::network::team_to_radio_ip(team_number);
+                let radio = crate::network::check_radio(&radio_ip).await;
+                let conn_status = ConnectionStatus {
+                    enet_link: net.enet_link,
+                    enet_ip: net.enet_ip,
+                    robot_radio: radio,
+                    robot: robot_state.connected,
+                    fms: robot_state.fms_connected,
+                    wifi: net.wifi,
+                    usb: net.usb,
+                };
+                let _ = event_tx.send(DsEvent::ConnectionStatus(conn_status)).await;
             }
         }
     }

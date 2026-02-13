@@ -11,6 +11,16 @@ export interface RobotState {
   sequence_number: number;
 }
 
+export interface ConnectionStatus {
+  enet_link: boolean;
+  enet_ip: string | null;
+  robot_radio: boolean;
+  robot: boolean;
+  fms: boolean;
+  wifi: boolean;
+  usb: boolean;
+}
+
 export interface DiagnosticData {
   cpu_usage: number;
   ram_usage: number;
@@ -25,11 +35,13 @@ export interface DiagnosticData {
 interface RobotStore {
   state: RobotState;
   diagnostics: DiagnosticData;
+  connectionStatus: ConnectionStatus;
   teamNumber: number;
   alliance: string;
   enabledTime: number;
   setRobotState: (state: RobotState) => void;
   setDiagnostics: (diag: DiagnosticData) => void;
+  setConnectionStatus: (status: ConnectionStatus) => void;
   setTeamNumber: (team: number) => void;
   setAlliance: (alliance: string) => void;
   setEnabledTime: (time: number) => void;
@@ -56,11 +68,21 @@ export const useRobotStore = create<RobotStore>((set) => ({
     can_rx_error: 0,
     can_tx_error: 0,
   },
+  connectionStatus: {
+    enet_link: false,
+    enet_ip: null,
+    robot_radio: false,
+    robot: false,
+    fms: false,
+    wifi: false,
+    usb: false,
+  },
   teamNumber: 0,
   alliance: "Red1",
   enabledTime: 0,
   setRobotState: (state) => set({ state }),
   setDiagnostics: (diagnostics) => set({ diagnostics }),
+  setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
   setTeamNumber: (teamNumber) => set({ teamNumber }),
   setAlliance: (alliance) => set({ alliance }),
   setEnabledTime: (enabledTime) => set({ enabledTime }),

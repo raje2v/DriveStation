@@ -77,6 +77,8 @@ pub struct GamepadManager {
     gilrs: Gilrs,
     gamepads: Vec<TrackedGamepad>,
     joystick_state: Arc<RwLock<Vec<JoystickState>>>,
+    /// Maps slot index → device name for locked slots
+    locked_slots: std::collections::HashMap<usize, String>,
 }
 
 impl GamepadManager {
@@ -87,6 +89,7 @@ impl GamepadManager {
             gilrs,
             gamepads: Vec::new(),
             joystick_state,
+            locked_slots: std::collections::HashMap::new(),
         };
 
         // Enumerate already-connected gamepads
@@ -94,11 +97,20 @@ impl GamepadManager {
         manager
     }
 
-    /// Find the first available slot (0-5) not occupied by any gamepad
+    /// Find the first available slot (0-5) not occupied and not locked-reserved
     fn first_available_slot(&self) -> usize {
         let used: std::collections::HashSet<usize> =
             self.gamepads.iter().map(|g| g.slot).collect();
-        (0..6).find(|s| !used.contains(s)).unwrap_or(self.gamepads.len())
+        (0..6)
+            .find(|s| !used.contains(s) && !self.locked_slots.contains_key(s))
+            .unwrap_or(self.gamepads.len())
+    }
+
+    /// Find the locked slot for a device by name, if any
+    fn find_locked_slot(&self, name: &str) -> Option<usize> {
+        self.locked_slots.iter()
+            .find(|(_, locked_name)| locked_name.as_str() == name)
+            .map(|(&slot, _)| slot)
     }
 
     fn enumerate_gamepads(&mut self) {
@@ -130,10 +142,16 @@ impl GamepadManager {
             match event {
                 EventType::Connected => {
                     let gamepad = self.gilrs.gamepad(id);
-                    let slot = self.first_available_slot();
+                    let name = gamepad.name().to_string();
+                    // Check if this device has a locked slot
+                    let slot = if let Some(locked) = self.find_locked_slot(&name) {
+                        locked
+                    } else {
+                        self.first_available_slot()
+                    };
                     self.gamepads.push(TrackedGamepad {
                         gilrs_id: id,
-                        name: gamepad.name().to_string(),
+                        name: name.clone(),
                         slot,
                         state: JoystickState::default(),
                         dpad_up: false,
@@ -142,11 +160,11 @@ impl GamepadManager {
                         dpad_left: false,
                     });
                     changed = true;
-                    tracing::info!("Gamepad connected: {} (slot {})", gamepad.name(), slot);
+                    tracing::info!("Gamepad connected: {} (slot {})", name, slot);
                 }
                 EventType::Disconnected => {
+                    // If slot is locked, keep the reservation but remove the gamepad
                     self.gamepads.retain(|g| g.gilrs_id != id);
-                    // Keep existing slot assignments (don't reassign)
                     changed = true;
                     tracing::info!("Gamepad disconnected");
                 }
@@ -248,9 +266,30 @@ impl GamepadManager {
                     axes: gp.state.axes.clone(),
                     buttons: gp.state.buttons.clone(),
                     povs: gp.state.povs.clone(),
+                    locked: self.locked_slots.contains_key(&gp.slot),
                 })
                 .collect(),
         }
+    }
+
+    /// Lock a slot to its current device name
+    pub fn lock_slot(&mut self, slot: usize) {
+        if let Some(gp) = self.gamepads.iter().find(|g| g.slot == slot) {
+            tracing::info!("Locking slot {} to '{}'", slot, gp.name);
+            self.locked_slots.insert(slot, gp.name.clone());
+        }
+    }
+
+    /// Unlock a slot
+    pub fn unlock_slot(&mut self, slot: usize) {
+        if self.locked_slots.remove(&slot).is_some() {
+            tracing::info!("Unlocked slot {}", slot);
+        }
+    }
+
+    /// Get locked slots info for the frontend (slot → device name)
+    pub fn get_locked_slots(&self) -> &std::collections::HashMap<usize, String> {
+        &self.locked_slots
     }
 
     pub fn gamepad_count(&self) -> usize {

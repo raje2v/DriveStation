@@ -8,17 +8,19 @@ import OperationTab from "./components/tabs/OperationTab";
 import DiagnosticsTab from "./components/tabs/DiagnosticsTab";
 import SetupTab from "./components/tabs/SetupTab";
 import USBDevicesTab from "./components/tabs/USBDevicesTab";
+import PowerTab from "./components/tabs/PowerTab";
 import StatusBar from "./components/StatusBar";
 import CompactBar from "./components/CompactBar";
 import Console from "./components/Console";
 import Charts from "./components/Charts";
 
-type Tab = "operation" | "diagnostics" | "setup" | "usb";
+type Tab = "operation" | "diagnostics" | "power" | "setup" | "usb";
 type RightPanel = "console" | "charts" | "both";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "operation", label: "Operation" },
   { id: "diagnostics", label: "Diagnostics" },
+  { id: "power", label: "Power" },
   { id: "setup", label: "Setup" },
   { id: "usb", label: "USB Devices" },
 ];
@@ -75,10 +77,12 @@ export default function App() {
       return;
     }
 
-    heldKeys.current.add(e.key);
+    // Use e.code (physical key) for the three-key combo — more reliable
+    // across keyboard layouts and avoids macOS WKWebView e.key quirks
+    heldKeys.current.add(e.code);
 
     // Compact mode toggle: Cmd+Shift+M (Mac) / Ctrl+Shift+M (Win/Linux)
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "M") {
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === "KeyM") {
       e.preventDefault();
       if (compactMode) {
         restoreFromCompact();
@@ -88,23 +92,24 @@ export default function App() {
       return;
     }
 
-    // Enable: [ + ] + \ (all three held)
+    // Enable: [ + ] + \ (all three held simultaneously)
     if (
-      heldKeys.current.has("[") &&
-      heldKeys.current.has("]") &&
-      heldKeys.current.has("\\")
+      heldKeys.current.has("BracketLeft") &&
+      heldKeys.current.has("BracketRight") &&
+      heldKeys.current.has("Backslash")
     ) {
       e.preventDefault();
       safeInvoke("enable_robot");
       return;
     }
 
-    switch (e.key) {
+    switch (e.code) {
       case "Enter":
+      case "NumpadEnter":
         e.preventDefault();
         safeInvoke("disable_robot");
         break;
-      case " ":
+      case "Space":
         e.preventDefault();
         safeInvoke("estop_robot");
         break;
@@ -112,7 +117,7 @@ export default function App() {
   }, [compactMode, snapCompact, restoreFromCompact]);
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
-    heldKeys.current.delete(e.key);
+    heldKeys.current.delete(e.code);
   }, []);
 
   useEffect(() => {
@@ -130,6 +135,8 @@ export default function App() {
         return <OperationTab />;
       case "diagnostics":
         return <DiagnosticsTab />;
+      case "power":
+        return <PowerTab />;
       case "setup":
         return <SetupTab />;
       case "usb":

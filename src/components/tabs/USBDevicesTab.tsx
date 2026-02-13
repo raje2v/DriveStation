@@ -140,11 +140,17 @@ function SlotContent({
   gamepad,
   isSelected,
   isDragging,
+  isLocked,
+  lockedName,
+  onToggleLock,
 }: {
   index: number;
   gamepad?: GamepadInfo;
   isSelected: boolean;
   isDragging?: boolean;
+  isLocked?: boolean;
+  lockedName?: string;
+  onToggleLock?: (e: React.MouseEvent) => void;
 }) {
   return (
     <div
@@ -161,8 +167,25 @@ function SlotContent({
       </span>
       {gamepad ? (
         <span className="text-xs truncate flex-1">{gamepad.name}</span>
+      ) : isLocked && lockedName ? (
+        <span className="text-xs text-ds-text-dim italic flex-1 truncate">
+          Locked — {lockedName}
+        </span>
       ) : (
         <span className="text-xs text-ds-text-dim italic flex-1">Empty</span>
+      )}
+      {onToggleLock && (gamepad || isLocked) && (
+        <button
+          onClick={onToggleLock}
+          className={`text-[10px] px-1 rounded transition-colors ${
+            isLocked
+              ? "text-ds-orange hover:text-ds-text"
+              : "text-ds-text-dim hover:text-ds-text"
+          }`}
+          title={isLocked ? "Unlock slot" : "Lock slot"}
+        >
+          {isLocked ? "\uD83D\uDD12" : "\uD83D\uDD13"}
+        </button>
       )}
       {gamepad && (
         <span className="text-[10px] text-ds-text-dim cursor-grab">⠿</span>
@@ -176,12 +199,18 @@ function SlotItem({
   index,
   gamepad,
   isSelected,
+  isLocked,
+  lockedName,
   onClick,
+  onToggleLock,
 }: {
   index: number;
   gamepad?: GamepadInfo;
   isSelected: boolean;
+  isLocked: boolean;
+  lockedName?: string;
   onClick: () => void;
+  onToggleLock: (e: React.MouseEvent) => void;
 }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `slot-${index}`,
@@ -215,6 +244,9 @@ function SlotItem({
           index={index}
           gamepad={gamepad}
           isSelected={isSelected}
+          isLocked={isLocked}
+          lockedName={lockedName}
+          onToggleLock={onToggleLock}
         />
       </div>
     </div>
@@ -222,7 +254,7 @@ function SlotItem({
 }
 
 export default function USBDevicesTab() {
-  const { gamepads } = useGamepadStore();
+  const { gamepads, lockedSlots, lockSlot, unlockSlot } = useGamepadStore();
   const [selectedSlot, setSelectedSlot] = useState(0);
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
 
@@ -260,6 +292,20 @@ export default function USBDevicesTab() {
       ? gamepads.find((gp) => gp.slot === activeSlot)
       : undefined;
 
+  const handleToggleLock = (slotIndex: number) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const gp = gamepads.find((g) => g.slot === slotIndex);
+    const isLocked = gp?.locked || slotIndex in lockedSlots;
+
+    if (isLocked) {
+      unlockSlot(slotIndex);
+      if (isTauri()) invoke("unlock_gamepad_slot", { slot: slotIndex });
+    } else if (gp) {
+      lockSlot(slotIndex, gp.name);
+      if (isTauri()) invoke("lock_gamepad_slot", { slot: slotIndex });
+    }
+  };
+
   // Build slot list (always show 6 slots, 0-5)
   const slots = Array.from({ length: 6 }, (_, i) => ({
     index: i,
@@ -284,15 +330,21 @@ export default function USBDevicesTab() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            {slots.map(({ index, gamepad }) => (
-              <SlotItem
-                key={index}
-                index={index}
-                gamepad={gamepad}
-                isSelected={selectedSlot === index}
-                onClick={() => setSelectedSlot(index)}
-              />
-            ))}
+            {slots.map(({ index, gamepad }) => {
+              const isLocked = gamepad?.locked || index in lockedSlots;
+              return (
+                <SlotItem
+                  key={index}
+                  index={index}
+                  gamepad={gamepad}
+                  isSelected={selectedSlot === index}
+                  isLocked={isLocked}
+                  lockedName={lockedSlots[index]}
+                  onClick={() => setSelectedSlot(index)}
+                  onToggleLock={handleToggleLock(index)}
+                />
+              );
+            })}
             <DragOverlay>
               {activeSlot !== null && activeGamepad ? (
                 <div className="w-[200px] shadow-lg">

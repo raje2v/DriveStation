@@ -3,7 +3,7 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
-use crate::protocol::types::ConsoleMessage;
+use crate::protocol::types::{ConsoleMessage, PowerData};
 
 /// Reads console output from the roboRIO TCP stream (port 1740)
 ///
@@ -17,11 +17,12 @@ use crate::protocol::types::ConsoleMessage;
 ///                           + location(2+n) + callstack(2+n)
 ///   0x0A = Version Info
 ///   0x00 = Radio Events
-///   0x04 = Disable Faults
-///   0x05 = Rail Faults
+///   0x04 = Disable Faults: comms(2 u16) + 12v(2 u16)
+///   0x05 = Rail Faults: 6v(2 u16) + 5v(2 u16) + 3.3v(2 u16)
 pub async fn console_log_listener(
     target_ip: String,
     log_tx: mpsc::Sender<ConsoleMessage>,
+    power_tx: mpsc::Sender<PowerData>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) {
     let addr = format!("{target_ip}:1740");
@@ -48,7 +49,7 @@ pub async fn console_log_listener(
 
         tracing::info!("Connected to roboRIO console at {addr}");
 
-        if let Err(e) = read_console_stream(stream, &log_tx, &mut shutdown_rx).await {
+        if let Err(e) = read_console_stream(stream, &log_tx, &power_tx, &mut shutdown_rx).await {
             tracing::warn!("Console stream error: {e}");
         }
 
@@ -76,8 +77,12 @@ fn read_prefixed_string(data: &[u8], offset: usize) -> Option<(String, usize)> {
 async fn read_console_stream(
     mut stream: TcpStream,
     log_tx: &mpsc::Sender<ConsoleMessage>,
+    power_tx: &mpsc::Sender<PowerData>,
     shutdown_rx: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    // Accumulate power data across tags (0x04 and 0x05 arrive separately)
+    let mut power = PowerData::default();
+
     loop {
         // Read size (2 bytes big endian)
         let size = tokio::select! {
@@ -188,6 +193,23 @@ async fn read_console_stream(
                             sequence,
                         }).await;
                     }
+                }
+            }
+            // Disable Faults (0x04): comms(2 u16 BE) + 12v(2 u16 BE)
+            0x04 => {
+                if data.len() >= 4 {
+                    power.disable_count_comms = u16::from_be_bytes([data[0], data[1]]);
+                    power.disable_count_12v = u16::from_be_bytes([data[2], data[3]]);
+                    let _ = power_tx.send(power.clone()).await;
+                }
+            }
+            // Rail Faults (0x05): 6v(2 u16 BE) + 5v(2 u16 BE) + 3.3v(2 u16 BE)
+            0x05 => {
+                if data.len() >= 6 {
+                    power.rail_faults_6v = u16::from_be_bytes([data[0], data[1]]);
+                    power.rail_faults_5v = u16::from_be_bytes([data[2], data[3]]);
+                    power.rail_faults_3v3 = u16::from_be_bytes([data[4], data[5]]);
+                    let _ = power_tx.send(power.clone()).await;
                 }
             }
             // Other tags — log for debugging but don't display

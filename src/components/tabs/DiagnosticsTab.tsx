@@ -59,27 +59,6 @@ export default function DiagnosticsTab() {
         </div>
       </section>
 
-      {/* CAN Bus */}
-      <section>
-        <h3 className="text-xs text-ds-text-dim uppercase tracking-wide mb-2">
-          CAN Bus
-        </h3>
-        <div className="bg-ds-panel rounded p-3 flex flex-col gap-1 text-sm">
-          <div className="flex justify-between">
-            <span className="text-ds-text-dim">Utilization</span>
-            <span>{(diagnostics.can_utilization * 100).toFixed(1)}%</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-ds-text-dim">Bus Off</span>
-            <span>{diagnostics.can_bus_off}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-ds-text-dim">TX Full</span>
-            <span>{diagnostics.can_tx_full}</span>
-          </div>
-        </div>
-      </section>
-
       {/* Actions */}
       <div className="flex gap-2">
         <button

@@ -20,6 +20,15 @@ pub async fn event_bridge(app: AppHandle, mut event_rx: mpsc::Receiver<DsEvent>)
             DsEvent::GamepadUpdate(update) => {
                 let _ = app.emit("gamepad-update", update);
             }
+            DsEvent::SystemInfo(info) => {
+                let _ = app.emit("system-info", info);
+            }
+            DsEvent::ConnectionStatus(status) => {
+                let _ = app.emit("connection-status", status);
+            }
+            DsEvent::PowerData(data) => {
+                let _ = app.emit("power-data", data);
+            }
         }
     }
 }
