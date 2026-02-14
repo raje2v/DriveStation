@@ -377,6 +377,10 @@ pub async fn protocol_loop(
     let (radio_result_tx, mut radio_result_rx) = mpsc::channel::<bool>(4);
     let mut last_radio_check = Instant::now() - std::time::Duration::from_secs(10); // trigger immediately
 
+    // USB roboRIO detection — cached and refreshed every 2s
+    let mut usb_detected = false;
+    let mut last_iface_check = Instant::now() - std::time::Duration::from_secs(10);
+
     loop {
         tokio::select! {
             // Process commands from frontend
@@ -440,6 +444,12 @@ pub async fn protocol_loop(
             // 50Hz send tick
             _ = tick_interval.tick() => {
                 if let Some(ref sock) = send_socket {
+                    // Periodically refresh USB interface detection
+                    if last_iface_check.elapsed() > std::time::Duration::from_secs(2) {
+                        usb_detected = crate::network::check_interfaces().usb;
+                        last_iface_check = Instant::now();
+                    }
+
                     let joysticks = joystick_state.read().clone();
                     let pkt = build_outbound_packet(sequence, &ds_state, &joysticks);
                     let dest: SocketAddr = format!("{target_ip}:1110")
@@ -448,6 +458,12 @@ pub async fn protocol_loop(
 
                     if let Err(e) = sock.send_to(&pkt, dest).await {
                         tracing::trace!("Send error: {e}");
+                    }
+
+                    // Also send to USB roboRIO IP if a USB interface is detected
+                    if usb_detected && target_ip != "172.22.11.2" {
+                        let usb_dest: SocketAddr = "172.22.11.2:1110".parse().unwrap();
+                        let _ = sock.send_to(&pkt, usb_dest).await;
                     }
 
                     sequence = sequence.wrapping_add(1);
@@ -482,11 +498,20 @@ pub async fn protocol_loop(
                     std::future::pending::<std::io::Result<(usize, SocketAddr)>>().await
                 }
             } => {
-                if let Ok((len, _addr)) = result {
+                if let Ok((len, addr)) = result {
                     // Only update last_recv for valid packets (>= 7 bytes)
                     if len >= 7 {
                         parse_inbound_packet(&recv_buf[..len], &mut robot_state, &mut diag);
                         last_recv = Instant::now();
+
+                        // Lock onto the responding IP (e.g. USB 172.22.11.2 vs static 10.TE.AM.2)
+                        // so TCP console also connects to the right address
+                        let resp_ip = addr.ip().to_string();
+                        if resp_ip != target_ip {
+                            tracing::info!("Robot responding from {resp_ip} (was {target_ip}), switching target");
+                            target_ip = resp_ip.clone();
+                            let _ = target_ip_tx.send(resp_ip);
+                        }
                     }
                 }
             }
