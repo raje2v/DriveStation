@@ -108,26 +108,27 @@ jobs:
       - name: Save updater signature
         shell: bash
         run: |
-          mkdir -p /tmp/updater-sig
+          SIG_DIR="${RUNNER_TEMP}/updater-sig"
+          mkdir -p "$SIG_DIR"
           # Tauri v2 updater sig files:
           #   macOS: .app.tar.gz.sig
-          #   Linux: .AppImage.sig (not .tar.gz.sig)
-          #   Windows: -setup.exe.sig (not .nsis.zip.sig)
+          #   Linux: .AppImage.sig
+          #   Windows: -setup.exe.sig
           SIG=$(find /tmp/artifacts -name "*.app.tar.gz.sig" -o -name "*.AppImage.sig" -o -name "*-setup.exe.sig" 2>/dev/null | head -1)
           if [ -n "$SIG" ]; then
             echo "Found updater sig: $SIG"
-            cp "$SIG" "/tmp/updater-sig/${{ matrix.label }}.sig"
+            cp "$SIG" "$SIG_DIR/${{ matrix.label }}.sig"
           else
             echo "WARNING: No updater signature file found"
-            echo "Available files:"
             ls -la /tmp/artifacts/ 2>/dev/null
           fi
+          echo "sig_dir=$SIG_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Upload signature artifact
         uses: actions/upload-artifact@v4
         with:
           name: sig-${{ matrix.label }}
-          path: /tmp/updater-sig/
+          path: ${{ runner.temp }}/updater-sig/
           if-no-files-found: warn
 
   updater-json:
