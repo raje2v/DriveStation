@@ -370,6 +370,13 @@ pub async fn protocol_loop(
     let mut tick_interval = tokio::time::interval(std::time::Duration::from_millis(20));
     let mut event_interval = tokio::time::interval(std::time::Duration::from_millis(100));
 
+    // Radio check runs in a spawned task to avoid blocking the protocol loop.
+    // On Windows, TCP connect to a non-listening port waits the full timeout (~200ms),
+    // which would stall all packet send/recv if done inline.
+    let mut radio_reachable = false;
+    let (radio_result_tx, mut radio_result_rx) = mpsc::channel::<bool>(4);
+    let mut last_radio_check = Instant::now() - std::time::Duration::from_secs(10); // trigger immediately
+
     loop {
         tokio::select! {
             // Process commands from frontend
@@ -491,19 +498,34 @@ pub async fn protocol_loop(
                 let _ = target_ip_tx.send(ip);
             }
 
+            // Radio check result (from spawned task)
+            Some(result) = radio_result_rx.recv() => {
+                radio_reachable = result;
+            }
+
             // 10Hz event emission to frontend
             _ = event_interval.tick() => {
                 let _ = event_tx.send(DsEvent::RobotState(robot_state.clone())).await;
                 let _ = event_tx.send(DsEvent::Diagnostics(diag.clone())).await;
 
-                // Connection status breakdown
+                // Spawn radio check every 2s (non-blocking — avoids stalling the loop
+                // on Windows where TCP connect waits the full timeout)
+                if last_radio_check.elapsed() > std::time::Duration::from_secs(2) {
+                    let radio_ip = crate::network::team_to_radio_ip(team_number);
+                    let rtx = radio_result_tx.clone();
+                    tokio::spawn(async move {
+                        let result = crate::network::check_radio(&radio_ip).await;
+                        let _ = rtx.send(result).await;
+                    });
+                    last_radio_check = Instant::now();
+                }
+
+                // Connection status breakdown (uses cached radio result)
                 let net = crate::network::check_interfaces();
-                let radio_ip = crate::network::team_to_radio_ip(team_number);
-                let radio = crate::network::check_radio(&radio_ip).await;
                 let conn_status = ConnectionStatus {
                     enet_link: net.enet_link,
                     enet_ip: net.enet_ip,
-                    robot_radio: radio,
+                    robot_radio: radio_reachable,
                     robot: robot_state.connected,
                     fms: robot_state.fms_connected,
                     wifi: net.wifi,
