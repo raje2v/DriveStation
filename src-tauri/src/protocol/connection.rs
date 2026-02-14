@@ -449,8 +449,8 @@ pub async fn protocol_loop(
                     ds_state.request_reboot = false;
                     ds_state.request_restart_code = false;
 
-                    // If no response for 1 second, mark disconnected
-                    if last_recv.elapsed() > std::time::Duration::from_secs(1) {
+                    // If no response for 3 seconds, mark disconnected
+                    if last_recv.elapsed() > std::time::Duration::from_secs(3) {
                         if robot_state.connected {
                             // Robot just disconnected — clear E-Stop so it can
                             // be re-enabled after a reboot/restart
@@ -476,8 +476,11 @@ pub async fn protocol_loop(
                 }
             } => {
                 if let Ok((len, _addr)) = result {
-                    parse_inbound_packet(&recv_buf[..len], &mut robot_state, &mut diag);
-                    last_recv = Instant::now();
+                    // Only update last_recv for valid packets (>= 7 bytes)
+                    if len >= 7 {
+                        parse_inbound_packet(&recv_buf[..len], &mut robot_state, &mut diag);
+                        last_recv = Instant::now();
+                    }
                 }
             }
 

@@ -35,6 +35,11 @@ Pre-built binaries for all platforms are available on the [Releases](https://git
 | Windows | `.msi`, `.exe` |
 | Linux | `.deb`, `.AppImage` |
 
+> **macOS note:** Since the app is not signed with an Apple Developer certificate, macOS Gatekeeper may report "app is damaged." To fix this, run in Terminal after installing:
+> ```bash
+> xattr -cr /Applications/DriveStation.app
+> ```
+
 ## Building from Source
 
 ### Prerequisites
