@@ -17,6 +17,7 @@ export interface ConnectionStatus {
   enet_ip: string | null;
   robot_radio: boolean;
   robot: boolean;
+  robot_ip: string | null;
   fms: boolean;
   wifi: boolean;
   usb: boolean;
@@ -24,8 +25,8 @@ export interface ConnectionStatus {
 
 export interface DiagnosticData {
   cpu_usage: number;
-  ram_usage: number;
-  disk_usage: number;
+  ram_free: number;
+  disk_free: number;
   can_utilization: number;
   can_bus_off: number;
   can_tx_full: number;
@@ -73,8 +74,8 @@ export const useRobotStore = create<RobotStore>()(
       },
       diagnostics: {
         cpu_usage: 0,
-        ram_usage: 0,
-        disk_usage: 0,
+        ram_free: 0,
+        disk_free: 0,
         can_utilization: 0,
         can_bus_off: 0,
         can_tx_full: 0,
@@ -86,6 +87,7 @@ export const useRobotStore = create<RobotStore>()(
         enet_ip: null,
         robot_radio: false,
         robot: false,
+        robot_ip: null,
         fms: false,
         wifi: false,
         usb: false,

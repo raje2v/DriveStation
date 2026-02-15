@@ -54,8 +54,8 @@ export default function DiagnosticsTab() {
         </h3>
         <div className="bg-ds-panel rounded p-3 flex flex-col gap-1 text-sm">
           <ResourceBar label="CPU" value={diagnostics.cpu_usage} />
-          <ResourceBar label="RAM" value={diagnostics.ram_usage} />
-          <ResourceBar label="Disk" value={diagnostics.disk_usage / 100} />
+          <ResourceValue label="RAM Free" bytes={diagnostics.ram_free} />
+          <ResourceValue label="Disk Free" bytes={diagnostics.disk_free} />
         </div>
       </section>
 
@@ -114,6 +114,23 @@ function ResourceBar({ label, value }: { label: string; value: number }) {
         <div className={`h-full ${color} transition-all`} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs w-10 text-right">{pct.toFixed(0)}%</span>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function ResourceValue({ label, bytes }: { label: string; bytes: number }) {
+  return (
+    <div className="flex justify-between">
+      <span className="text-ds-text-dim">{label}</span>
+      <span className="text-xs font-mono">{formatBytes(bytes)}</span>
     </div>
   );
 }

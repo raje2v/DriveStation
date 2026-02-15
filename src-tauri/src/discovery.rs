@@ -1,64 +1,39 @@
-use mdns_sd::{ServiceDaemon, ServiceEvent};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing;
 
-/// Discover the roboRIO via mDNS, falling back to static IP
+/// Discover the roboRIO via mDNS hostname resolution, then static IP fallback
 pub async fn discover_roborio(team: u32, result_tx: mpsc::Sender<String>) {
     if team == 0 {
         let _ = result_tx.send("127.0.0.1".to_string()).await;
         return;
     }
 
-    let mdns_name = format!("roborio-{team}-frc");
+    // Try direct mDNS hostname resolution (roboRIO-TEAM-FRC.local)
+    // The system resolver handles .local domains via mDNS on macOS/Linux
+    let hostname = format!("roboRIO-{team}-FRC.local:1110");
+    tracing::info!("Trying mDNS hostname resolution: {hostname}");
 
-    // Try mDNS discovery
-    let mdns = ServiceDaemon::new();
-    match mdns {
-        Ok(mdns) => {
-            let service_type = "_ni._tcp.local.";
-            match mdns.browse(service_type) {
-                Ok(receiver) => {
-                    let timeout = tokio::time::sleep(Duration::from_secs(5));
-                    tokio::pin!(timeout);
-
-                    loop {
-                        tokio::select! {
-                            _ = &mut timeout => {
-                                tracing::info!("mDNS timeout, falling back to static IP");
-                                break;
-                            }
-                            event = tokio::task::spawn_blocking({
-                                let receiver = receiver.clone();
-                                move || receiver.recv_timeout(Duration::from_secs(1))
-                            }) => {
-                                match event {
-                                    Ok(Ok(ServiceEvent::ServiceResolved(info))) => {
-                                        let name = info.get_fullname().to_lowercase();
-                                        if name.contains(&mdns_name.to_lowercase()) {
-                                            if let Some(addr) = info.get_addresses().iter().next() {
-                                                tracing::info!("Found roboRIO via mDNS: {addr}");
-                                                let _ = result_tx.send(addr.to_string()).await;
-                                                let _ = mdns.shutdown();
-                                                return;
-                                            }
-                                        }
-                                    }
-                                    Ok(Ok(_)) => continue,
-                                    _ => break,
-                                }
-                            }
-                        }
-                    }
-                    let _ = mdns.shutdown();
-                }
-                Err(e) => {
-                    tracing::warn!("mDNS browse failed: {e}");
-                }
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::net::lookup_host(&hostname),
+    )
+    .await
+    {
+        Ok(Ok(mut addrs)) => {
+            // Prefer IPv4 addresses
+            if let Some(addr) = addrs.find(|a| a.is_ipv4()) {
+                let ip = addr.ip().to_string();
+                tracing::info!("mDNS resolved roboRIO to {ip}");
+                let _ = result_tx.send(ip).await;
+                return;
             }
         }
-        Err(e) => {
-            tracing::warn!("mDNS init failed: {e}");
+        Ok(Err(e)) => {
+            tracing::info!("mDNS hostname resolution failed: {e}");
+        }
+        Err(_) => {
+            tracing::info!("mDNS hostname resolution timed out");
         }
     }
 
@@ -66,6 +41,6 @@ pub async fn discover_roborio(team: u32, result_tx: mpsc::Sender<String>) {
     let te = team / 100;
     let am = team % 100;
     let ip = format!("10.{te}.{am}.2");
-    tracing::info!("Using static IP: {ip}");
+    tracing::info!("Using static IP fallback: {ip}");
     let _ = result_tx.send(ip).await;
 }

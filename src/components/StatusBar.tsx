@@ -39,10 +39,6 @@ export default function StatusBar() {
   const { state, connectionStatus, teamNumber } = useRobotStore();
   const { gamepads } = useGamepadStore();
 
-  const robotIp =
-    teamNumber === 0
-      ? "127.0.0.1"
-      : `10.${Math.floor(teamNumber / 100)}.${teamNumber % 100}.2`;
   const radioIp =
     teamNumber === 0
       ? "127.0.0.1"
@@ -69,7 +65,7 @@ export default function StatusBar() {
           active={connectionStatus.robot}
           color="green"
           label="Robot"
-          tip={connectionStatus.robot ? robotIp : "Not connected"}
+          tip={connectionStatus.robot_ip ?? "Not connected"}
         />
         <StatusLEDWithTip
           active={connectionStatus.fms}

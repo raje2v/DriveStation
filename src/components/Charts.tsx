@@ -27,10 +27,10 @@ interface ModeSegment {
 }
 
 const PHASE_COLORS: Record<RobotPhase, string> = {
-  Disable: "rgba(76, 175, 80, 0.15)",
-  Auto: "rgba(255, 235, 59, 0.18)",
-  Tele: "rgba(33, 150, 243, 0.15)",
-  Test: "rgba(171, 71, 188, 0.15)",
+  Disable: "rgba(76, 175, 80, 0.25)",
+  Auto: "rgba(255, 235, 59, 0.30)",
+  Tele: "rgba(33, 150, 243, 0.25)",
+  Test: "rgba(171, 71, 188, 0.25)",
 };
 
 const PHASE_DOT_COLORS: Record<RobotPhase, string> = {
@@ -60,48 +60,48 @@ export default function Charts() {
   const [segments, setSegments] = useState<ModeSegment[]>([]);
   const [timeRange, setTimeRange] = useState<TimeRange>(60);
   const startTime = useRef(Date.now());
-  const lastPhaseRef = useRef<RobotPhase>("Disable");
 
   const addPoint = useCallback(() => {
     const now = Date.now();
     const time = (now - startTime.current) / 1000;
-    const phase = getPhase(state.enabled, state.mode);
+    // Read directly from Zustand store to get the absolute latest values
+    const store = useRobotStore.getState();
+    const s = store.state;
+    const d = store.diagnostics;
+    const phase = getPhase(s.enabled, s.mode);
 
     setData((prev) => {
       const next = [
         ...prev,
         {
           time,
-          battery: state.battery_voltage,
-          cpu: diagnostics.cpu_usage * 100,
-          ram: diagnostics.ram_usage * 100,
-          can: diagnostics.can_utilization * 100,
+          battery: s.battery_voltage,
+          cpu: d.cpu_usage * 100,
+          ram: d.ram_free / (1024 * 1024),
+          can: d.can_utilization * 100,
         },
       ];
-      // Keep enough data for the max time range (5min) plus buffer
       const cutoff = time - 320;
       return next.filter((p) => p.time > cutoff);
     });
 
     setSegments((prev) => {
       const updated = [...prev];
-      if (updated.length === 0 || lastPhaseRef.current !== phase) {
-        // Close the previous segment
+      // Derive last phase from the array itself (safe for React strict mode
+      // double-invocation — no mutable refs inside state updaters)
+      const lastPhase = updated.length > 0 ? updated[updated.length - 1].phase : null;
+      if (lastPhase !== phase) {
         if (updated.length > 0) {
           updated[updated.length - 1].end = time;
         }
-        // Start a new segment
         updated.push({ start: time, end: time, phase });
-        lastPhaseRef.current = phase;
       } else {
-        // Extend the current segment
         updated[updated.length - 1].end = time;
       }
-      // Trim old segments
       const cutoff = time - 320;
       return updated.filter((s) => s.end > cutoff);
     });
-  }, [state.battery_voltage, state.enabled, state.mode, diagnostics.cpu_usage, diagnostics.ram_usage, diagnostics.can_utilization]);
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(addPoint, 1000);
@@ -120,20 +120,6 @@ export default function Charts() {
       end: Math.min(s.end, now),
     }));
 
-  const modeAreas = (
-    <>
-      {visibleSegments.map((seg, i) => (
-        <ReferenceArea
-          key={`${seg.phase}-${i}`}
-          x1={seg.start}
-          x2={seg.end}
-          fill={PHASE_COLORS[seg.phase]}
-          fillOpacity={1}
-          ifOverflow="hidden"
-        />
-      ))}
-    </>
-  );
 
   return (
     <div className="flex flex-col h-full">
@@ -159,16 +145,32 @@ export default function Charts() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2 bg-ds-bg">
-        {/* Battery + CPU Chart (matches NI DS bottom chart) */}
+        {/* Battery + CPU Chart */}
         <div className="mb-3">
           <div className="flex items-center gap-3 mb-0.5">
-            <span className="text-xs text-ds-text-dim">Battery (V)</span>
-            <span className="text-xs text-ds-text-dim">+ CPU (%)</span>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "#4caf50" }} />
+              <span className="text-[10px] text-ds-text-dim">Battery (V)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "#e91e63" }} />
+              <span className="text-[10px] text-ds-text-dim">CPU (%)</span>
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={100}>
             <LineChart data={visibleData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#4a4a4a" />
-              {modeAreas}
+              {visibleSegments.map((seg, i) => (
+                <ReferenceArea
+                  key={`batt-${seg.phase}-${i}`}
+                  yAxisId="volts"
+                  x1={seg.start}
+                  x2={seg.end}
+                  fill={PHASE_COLORS[seg.phase]}
+                  fillOpacity={1}
+                  ifOverflow="hidden"
+                />
+              ))}
               <XAxis
                 dataKey="time"
                 domain={[windowStart, now]}
@@ -187,7 +189,7 @@ export default function Charts() {
               <YAxis
                 yAxisId="pct"
                 domain={[0, 100]}
-                tick={{ fontSize: 9, fill: "#3a7bd5" }}
+                tick={{ fontSize: 9, fill: "#e91e63" }}
                 width={28}
                 orientation="right"
               />
@@ -204,7 +206,7 @@ export default function Charts() {
                 yAxisId="pct"
                 type="monotone"
                 dataKey="cpu"
-                stroke="#3a7bd5"
+                stroke="#e91e63"
                 strokeWidth={1.5}
                 dot={false}
                 isAnimationActive={false}
@@ -213,16 +215,32 @@ export default function Charts() {
           </ResponsiveContainer>
         </div>
 
-        {/* RAM + CAN Chart */}
+        {/* RAM Free + CAN Chart */}
         <div className="mb-3">
           <div className="flex items-center gap-3 mb-0.5">
-            <span className="text-xs text-ds-text-dim">RAM (%)</span>
-            <span className="text-xs text-ds-text-dim">+ CAN (%)</span>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "#ab47bc" }} />
+              <span className="text-[10px] text-ds-text-dim">RAM Free (MB)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-0.5 rounded" style={{ backgroundColor: "#ff9800" }} />
+              <span className="text-[10px] text-ds-text-dim">CAN (%)</span>
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={100}>
             <LineChart data={visibleData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#4a4a4a" />
-              {modeAreas}
+              {visibleSegments.map((seg, i) => (
+                <ReferenceArea
+                  key={`ram-${seg.phase}-${i}`}
+                  yAxisId="mb"
+                  x1={seg.start}
+                  x2={seg.end}
+                  fill={PHASE_COLORS[seg.phase]}
+                  fillOpacity={1}
+                  ifOverflow="hidden"
+                />
+              ))}
               <XAxis
                 dataKey="time"
                 domain={[windowStart, now]}
@@ -232,11 +250,21 @@ export default function Charts() {
                 interval="preserveStartEnd"
               />
               <YAxis
-                domain={[0, 100]}
-                tick={{ fontSize: 9, fill: "#888" }}
+                yAxisId="mb"
+                domain={[0, "auto"]}
+                tick={{ fontSize: 9, fill: "#ab47bc" }}
                 width={28}
+                orientation="left"
+              />
+              <YAxis
+                yAxisId="pct"
+                domain={[0, 100]}
+                tick={{ fontSize: 9, fill: "#ff9800" }}
+                width={28}
+                orientation="right"
               />
               <Line
+                yAxisId="mb"
                 type="monotone"
                 dataKey="ram"
                 stroke="#ab47bc"
@@ -245,6 +273,7 @@ export default function Charts() {
                 isAnimationActive={false}
               />
               <Line
+                yAxisId="pct"
                 type="monotone"
                 dataKey="can"
                 stroke="#ff9800"
@@ -258,15 +287,18 @@ export default function Charts() {
 
         {/* Mode Legend */}
         <div className="flex items-center justify-center gap-3 py-1">
-          {(["Disable", "Auto", "Tele", "Test"] as const).map((phase) => (
-            <div key={phase} className="flex items-center gap-1">
-              <div
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: PHASE_DOT_COLORS[phase] }}
-              />
-              <span className="text-[10px] text-ds-text-dim">{phase}</span>
-            </div>
-          ))}
+          {(["Disable", "Auto", "Tele", "Test"] as const).map((phase) => {
+            const currentPhase = getPhase(state.enabled, state.mode);
+            return (
+              <div key={phase} className="flex items-center gap-1">
+                <div
+                  className={`w-2 h-2 rounded-full ${currentPhase === phase ? "ring-1 ring-white" : ""}`}
+                  style={{ backgroundColor: PHASE_DOT_COLORS[phase] }}
+                />
+                <span className={`text-[10px] ${currentPhase === phase ? "text-ds-text font-bold" : "text-ds-text-dim"}`}>{phase}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

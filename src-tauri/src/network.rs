@@ -32,6 +32,8 @@ pub fn check_interfaces() -> NetworkInfo {
     let mut wifi = false;
     let mut usb = false;
 
+    let mut wifi_ip: Option<String> = None;
+
     for iface in &ifaces {
         if iface.is_loopback() {
             continue;
@@ -55,14 +57,23 @@ pub fn check_interfaces() -> NetworkInfo {
         // macOS: en0 is typically WiFi on laptops
         // Linux: wlan*, wlp*
         let name = &iface.name;
-        if name == "en0" || name.starts_with("wlan") || name.starts_with("wlp") {
+        let is_wifi = name == "en0" || name.starts_with("wlan") || name.starts_with("wlp");
+        if is_wifi {
             wifi = true;
+            if wifi_ip.is_none() {
+                wifi_ip = Some(ip_str);
+            }
+        } else {
+            // Prefer wired ethernet IPs over WiFi
+            if enet_ip.is_none() {
+                enet_ip = Some(ip_str);
+            }
         }
+    }
 
-        // Use the first non-loopback, non-USB IPv4 as the reported IP
-        if enet_ip.is_none() {
-            enet_ip = Some(ip_str);
-        }
+    // Fall back to WiFi IP if no wired ethernet IP found
+    if enet_ip.is_none() {
+        enet_ip = wifi_ip;
     }
 
     NetworkInfo {

@@ -4,6 +4,7 @@ export interface LogEntry {
   timestamp: number;
   message: string;
   is_error: boolean;
+  is_warning: boolean;
   sequence: number;
 }
 

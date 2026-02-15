@@ -103,8 +103,10 @@ impl Default for JoystickState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticData {
     pub cpu_usage: f32,
-    pub ram_usage: f32,
-    pub disk_usage: f32,
+    /// RAM free space in bytes
+    pub ram_free: u32,
+    /// Disk free space in bytes
+    pub disk_free: u32,
     pub can_utilization: f32,
     pub can_bus_off: u32,
     pub can_tx_full: u32,
@@ -116,8 +118,8 @@ impl Default for DiagnosticData {
     fn default() -> Self {
         Self {
             cpu_usage: 0.0,
-            ram_usage: 0.0,
-            disk_usage: 0.0,
+            ram_free: 0,
+            disk_free: 0,
             can_utilization: 0.0,
             can_bus_off: 0,
             can_tx_full: 0,
@@ -154,6 +156,7 @@ pub struct ConnectionStatus {
     pub enet_ip: Option<String>,
     pub robot_radio: bool,
     pub robot: bool,
+    pub robot_ip: Option<String>,
     pub fms: bool,
     pub wifi: bool,
     pub usb: bool,
@@ -166,6 +169,7 @@ impl Default for ConnectionStatus {
             enet_ip: None,
             robot_radio: false,
             robot: false,
+            robot_ip: None,
             fms: false,
             wifi: false,
             usb: false,
@@ -178,6 +182,7 @@ pub struct ConsoleMessage {
     pub timestamp: f64,
     pub message: String,
     pub is_error: bool,
+    pub is_warning: bool,
     pub sequence: u16,
 }
 

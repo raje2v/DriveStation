@@ -140,13 +140,15 @@ async fn read_console_stream(
                             timestamp,
                             message,
                             is_error: false,
+                            is_warning: false,
                             sequence,
                         }).await;
                     }
                 }
             }
-            // Error Message (0x0B): timestamp(4) + seqnum(2) + unknown(2) + error_code(4)
+            // Error/Warning Message (0x0B): timestamp(4) + seqnum(2) + unknown(2) + error_code(4)
             //   + flags(1) + details(2+n) + location(2+n) + callstack(2+n)
+            //   flags bit 0: 1=error, 0=warning
             0x0B => {
                 if data.len() >= 13 {
                     let timestamp = f32::from_be_bytes([
@@ -157,6 +159,7 @@ async fn read_console_stream(
                     // data[8..12] = error_code (4 bytes i32)
                     let flags = data[12];
                     let is_error = (flags & 0x01) != 0;
+                    let is_warning = !is_error;
 
                     // Parse length-prefixed strings: Details, Location, Call Stack
                     let mut offset = 13;
@@ -188,6 +191,7 @@ async fn read_console_stream(
                             timestamp,
                             message,
                             is_error,
+                            is_warning,
                             sequence,
                         }).await;
                     }
@@ -206,6 +210,7 @@ async fn read_console_stream(
                             timestamp,
                             message,
                             is_error: true,
+                            is_warning: false,
                             sequence,
                         }).await;
                     }

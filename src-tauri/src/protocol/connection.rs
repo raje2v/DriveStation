@@ -185,47 +185,61 @@ fn parse_inbound_packet(data: &[u8], robot_state: &mut RobotState, diag: &mut Di
         let tag = data[i + 1];
         let tag_data = &data[i + 2..i + 1 + size];
 
+        // Debug: log all received tags with hex dump of first 20 bytes
+        tracing::debug!(
+            "UDP tag 0x{:02X}, size={}, data({} bytes): {:02X?}",
+            tag,
+            size,
+            tag_data.len(),
+            &tag_data[..tag_data.len().min(20)]
+        );
+
         match tag {
             0x04 => {
-                // Disk usage
-                if tag_data.len() >= 4 {
-                    diag.disk_usage = u32::from_be_bytes([
-                        tag_data[0], tag_data[1], tag_data[2], tag_data[3],
-                    ]) as f32;
+                // Disk info: block_count(4 u32) + free_space_bytes(4 u32)
+                if tag_data.len() >= 8 {
+                    diag.disk_free = u32::from_be_bytes([
+                        tag_data[4], tag_data[5], tag_data[6], tag_data[7],
+                    ]);
                 }
             }
             0x05 => {
-                // CPU usage
-                if tag_data.len() >= 12 {
-                    // CPU count + per-core usage as float
-                    let num_cpus = tag_data[0] as usize;
-                    if num_cpus > 0 && tag_data.len() >= 1 + num_cpus * 4 {
-                        let mut total = 0.0f32;
+                // CPU usage: num_cpus(1) + 4 priority groups × num_cpus × f32
+                // Groups: critical, above_normal, normal, low
+                // Total per-core = sum of all 4 groups; values are percentages (0-100)
+                let num_cpus = tag_data[0] as usize;
+                let expected_len = 1 + 4 * num_cpus * 4;
+                if num_cpus > 0 && tag_data.len() >= expected_len {
+                    let mut per_core_totals = vec![0.0f32; num_cpus];
+                    for group in 0..4 {
                         for c in 0..num_cpus {
-                            let offset = 1 + c * 4;
-                            let cpu = f32::from_bits(u32::from_be_bytes([
+                            let offset = 1 + (group * num_cpus + c) * 4;
+                            let val = f32::from_bits(u32::from_be_bytes([
                                 tag_data[offset],
                                 tag_data[offset + 1],
                                 tag_data[offset + 2],
                                 tag_data[offset + 3],
                             ]));
-                            total += cpu;
+                            per_core_totals[c] += val;
                         }
-                        diag.cpu_usage = total / num_cpus as f32;
                     }
+                    let avg: f32 = per_core_totals.iter().sum::<f32>() / num_cpus as f32;
+                    // Convert from percentage (0-100) to fraction (0.0-1.0)
+                    diag.cpu_usage = (avg / 100.0).clamp(0.0, 1.0);
                 }
             }
             0x06 => {
-                // RAM usage
-                if tag_data.len() >= 4 {
-                    diag.ram_usage = f32::from_bits(u32::from_be_bytes([
-                        tag_data[0], tag_data[1], tag_data[2], tag_data[3],
-                    ]));
+                // RAM info: block_count(4 u32) + free_space_bytes(4 u32)
+                if tag_data.len() >= 8 {
+                    diag.ram_free = u32::from_be_bytes([
+                        tag_data[4], tag_data[5], tag_data[6], tag_data[7],
+                    ]);
                 }
             }
             0x0E => {
-                // CAN metrics
-                if tag_data.len() >= 14 {
+                // CAN metrics: utilization(4 f32) + bus_off(4 u32) + tx_full(4 u32)
+                //   + rx_error(1 u8) + tx_error(1 u8) = 14 bytes
+                if tag_data.len() >= 12 {
                     diag.can_utilization =
                         f32::from_bits(u32::from_be_bytes([
                             tag_data[0], tag_data[1], tag_data[2], tag_data[3],
@@ -234,10 +248,15 @@ fn parse_inbound_packet(data: &[u8], robot_state: &mut RobotState, diag: &mut Di
                         u32::from_be_bytes([tag_data[4], tag_data[5], tag_data[6], tag_data[7]]);
                     diag.can_tx_full =
                         u32::from_be_bytes([tag_data[8], tag_data[9], tag_data[10], tag_data[11]]);
-                    // More CAN fields if available
+                }
+                if tag_data.len() >= 14 {
+                    diag.can_rx_error = tag_data[12] as u32;
+                    diag.can_tx_error = tag_data[13] as u32;
                 }
             }
-            _ => {} // Unknown tag, skip
+            other => {
+                tracing::debug!("Unknown UDP tag 0x{:02X}, {} bytes", other, tag_data.len());
+            }
         }
 
         // Advance past this tag: size_byte(1) + size
@@ -380,6 +399,9 @@ pub async fn protocol_loop(
     // USB roboRIO detection — cached and refreshed every 2s
     let mut usb_detected = false;
     let mut last_iface_check = Instant::now() - std::time::Duration::from_secs(10);
+
+    // Periodic re-discovery when not connected
+    let mut last_discovery_attempt = Instant::now();
 
     loop {
         tokio::select! {
@@ -533,6 +555,21 @@ pub async fn protocol_loop(
                 let _ = event_tx.send(DsEvent::RobotState(robot_state.clone())).await;
                 let _ = event_tx.send(DsEvent::Diagnostics(diag.clone())).await;
 
+                // Re-discover roboRIO every 10s while not connected
+                if !robot_state.connected
+                    && team_number > 0
+                    && last_discovery_attempt.elapsed() > std::time::Duration::from_secs(10)
+                {
+                    if pending_discovery.as_ref().map_or(true, |h| h.is_finished()) {
+                        let dtx = discovery_tx.clone();
+                        let team = team_number;
+                        pending_discovery = Some(tokio::spawn(
+                            crate::discovery::discover_roborio(team, dtx),
+                        ));
+                        last_discovery_attempt = Instant::now();
+                    }
+                }
+
                 // Spawn radio check every 2s (non-blocking — avoids stalling the loop
                 // on Windows where TCP connect waits the full timeout)
                 if last_radio_check.elapsed() > std::time::Duration::from_secs(2) {
@@ -552,6 +589,7 @@ pub async fn protocol_loop(
                     enet_ip: net.enet_ip,
                     robot_radio: radio_reachable,
                     robot: robot_state.connected,
+                    robot_ip: if robot_state.connected { Some(target_ip.clone()) } else { None },
                     fms: robot_state.fms_connected,
                     wifi: net.wifi,
                     usb: net.usb,
