@@ -55,7 +55,7 @@ function formatTime(secs: number): string {
 }
 
 export default function Charts() {
-  const { state, diagnostics } = useRobotStore();
+  const { state } = useRobotStore();
   const [data, setData] = useState<DataPoint[]>([]);
   const [segments, setSegments] = useState<ModeSegment[]>([]);
   const [timeRange, setTimeRange] = useState<TimeRange>(60);
